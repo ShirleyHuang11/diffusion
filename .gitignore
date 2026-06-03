@@ -1,0 +1,9 @@
+# run artifacts
+runs/
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# humanize loop state stays local
+.humanize/
