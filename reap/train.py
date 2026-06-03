@@ -136,8 +136,74 @@ def run_random(cfg: Config, out_dir: Path, resume: bool) -> dict:
     }
 
 
+def run_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
+    """MAPPO training (optionally with an intrinsic bonus) on the configured env."""
+    from reap.algos.mappo import MappoTrainer
+
+    env = make_env(cfg.env.id, **_env_kwargs(cfg))
+    trainer = MappoTrainer(env, cfg.algo.params, seed=cfg.run.seed)
+    logger = MetricsLogger(out_dir, jsonl=cfg.logging.jsonl, csv_enabled=cfg.logging.csv)
+    ckpt_dir = out_dir / "checkpoints"
+
+    if resume:
+        ckpt_path = latest_checkpoint(ckpt_dir)
+        if ckpt_path is None:
+            raise ConfigError(f"--resume requested but no checkpoint found in {ckpt_dir}")
+        trainer.load_state_dict(load_checkpoint(ckpt_path)["trainer"])
+
+    start_time = time.monotonic()
+    deadline = start_time + cfg.run.max_wall_clock_minutes * 60
+
+    def grid_next(interval: int) -> int:
+        return (trainer.env_step // interval + 1) * interval
+
+    next_log = grid_next(cfg.logging.interval_env_steps)
+    next_ckpt = grid_next(cfg.checkpoint.interval_env_steps)
+
+    def save() -> None:
+        save_checkpoint(
+            {"trainer": trainer.state_dict(), "config": cfg.to_dict()},
+            ckpt_dir / checkpoint_name(trainer.env_step),
+        )
+        prune_checkpoints(ckpt_dir, cfg.checkpoint.keep_last)
+
+    while trainer.env_step < cfg.algo.total_env_steps:
+        if time.monotonic() > deadline:
+            save()  # long runs preserve progress before stopping
+            raise WallClockExceeded(
+                f"run exceeded max_wall_clock_minutes={cfg.run.max_wall_clock_minutes}"
+            )
+        rollout = trainer.collect_rollout()
+        diags = trainer.update(rollout)
+
+        if trainer.env_step >= next_log:
+            stats = trainer.episode_stats()
+            logger.log(
+                trainer.env_step,
+                extrinsic=stats,
+                intrinsic={
+                    "bonus_mean": float(rollout["intrinsic"].mean()),
+                    **{k: v for k, v in rollout["bonus_diag"].items()},
+                },
+                diag={
+                    **diags,
+                    "updates": float(trainer.updates),
+                    "wall_time_s": time.monotonic() - start_time,
+                },
+            )
+            next_log = grid_next(cfg.logging.interval_env_steps)
+        if trainer.env_step >= next_ckpt:
+            save()
+            next_ckpt = grid_next(cfg.checkpoint.interval_env_steps)
+
+    save()
+    final = trainer.episode_stats()
+    return {"env_step": trainer.env_step, **final}
+
+
 RUNNERS = {
     "random": run_random,
+    "mappo": run_mappo,
 }
 
 
@@ -158,10 +224,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="path to a YAML config")
     parser.add_argument("--resume", action="store_true", help="resume from latest checkpoint")
+    parser.add_argument(
+        "--seed", type=int, default=None,
+        help="override run.seed (for multi-seed protocols sharing one config)",
+    )
     args = parser.parse_args(argv)
 
     try:
         cfg = load_config(args.config)
+        if args.seed is not None:
+            import dataclasses
+
+            cfg = dataclasses.replace(cfg, run=dataclasses.replace(cfg.run, seed=args.seed))
         summary = run_from_config(cfg, resume=args.resume)
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)

@@ -1,5 +1,6 @@
 # run artifacts
 runs/
+slurm-logs/
 *.egg-info/
 __pycache__/
 *.pyc
