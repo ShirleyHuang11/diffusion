@@ -130,6 +130,33 @@ class Config:
         return dataclasses.asdict(self)
 
 
+def _check_scalar_type(value: Any, annotation: str, path: str) -> Any:
+    """Validate a config value against its dataclass field annotation.
+
+    YAML happily produces strings where numbers are expected (and vice versa),
+    so every scalar is checked explicitly. Booleans are deliberately rejected
+    for int/float fields (bool is an int subclass in Python).
+    """
+    if annotation == "str":
+        if not isinstance(value, str):
+            raise ConfigError(f"'{path}' must be a string, got {value!r}")
+    elif annotation == "bool":
+        if not isinstance(value, bool):
+            raise ConfigError(f"'{path}' must be a boolean (true/false), got {value!r}")
+    elif annotation == "int":
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigError(f"'{path}' must be an integer, got {value!r}")
+    elif annotation == "float":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ConfigError(f"'{path}' must be a number, got {value!r}")
+    elif annotation == "dict":
+        if not isinstance(value, dict):
+            raise ConfigError(f"'{path}' must be a mapping, got {value!r}")
+    else:  # unhandled annotation is a programming error, not a user error
+        raise TypeError(f"no validator for config field type {annotation!r} at '{path}'")
+    return value
+
+
 def _build_section(cls: type, raw: Any, path: str) -> Any:
     if not isinstance(raw, dict):
         raise ConfigError(f"section '{path}' must be a mapping, got {type(raw).__name__}")
@@ -142,10 +169,7 @@ def _build_section(cls: type, raw: Any, path: str) -> Any:
     for f in dataclasses.fields(cls):
         key = f.name
         if key in raw:
-            value = raw[key]
-            if dataclasses.is_dataclass(f.type) if isinstance(f.type, type) else False:
-                value = _build_section(f.type, value, f"{path}.{key}")
-            kwargs[key] = value
+            kwargs[key] = _check_scalar_type(raw[key], f.type, f"{path}.{key}")
         else:
             has_default = f.default is not dataclasses.MISSING and f.default is not _REQUIRED
             has_factory = f.default_factory is not dataclasses.MISSING  # type: ignore[misc]

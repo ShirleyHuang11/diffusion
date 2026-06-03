@@ -73,6 +73,42 @@ def test_nonpositive_steps_rejected(tmp_path):
         load_config(write(tmp_path, VALID.replace("total_env_steps: 100", "total_env_steps: 0")))
 
 
+@pytest.mark.parametrize(
+    ("needle", "replacement", "field"),
+    [
+        ("  max_wall_clock_minutes: 5\n", "  max_wall_clock_minutes: nope\n", "max_wall_clock_minutes"),
+        ("  horizon: 100\n", "  horizon: nope\n", "horizon"),
+        ("  horizon: 100\n", "  horizon: 99.5\n", "horizon"),
+        ("  horizon: 100\n", "  horizon: true\n", "horizon"),
+        ("  total_env_steps: 100\n", "  total_env_steps: lots\n", "total_env_steps"),
+        ("  total_env_steps: 100\n", "  total_env_steps: true\n", "total_env_steps"),
+        ("  seed: 0\n", "  seed: zero\n", "seed"),
+        ("  name: t\n", "  name: 5\n", "name"),
+        ("  max_wall_clock_minutes: 5\n", "  max_wall_clock_minutes: true\n", "max_wall_clock_minutes"),
+    ],
+)
+def test_wrong_scalar_types_rejected(tmp_path, needle, replacement, field):
+    assert needle in VALID
+    with pytest.raises(ConfigError, match=field):
+        load_config(write(tmp_path, VALID.replace(needle, replacement)))
+
+
+def test_wrong_logging_bool_rejected(tmp_path):
+    with pytest.raises(ConfigError, match="logging.jsonl"):
+        load_config(write(tmp_path, VALID + "logging:\n  jsonl: maybe\n"))
+
+
+def test_wrong_checkpoint_cadence_type_rejected(tmp_path):
+    with pytest.raises(ConfigError, match="checkpoint.interval_env_steps"):
+        load_config(write(tmp_path, VALID + "checkpoint:\n  interval_env_steps: soon\n"))
+
+
+def test_wrong_params_mapping_rejected(tmp_path):
+    broken = VALID + "  params: 5\n"  # appended under algo
+    with pytest.raises(ConfigError, match="algo.params"):
+        load_config(write(tmp_path, broken))
+
+
 def test_missing_file_rejected(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_config(tmp_path / "nope.yaml")

@@ -99,10 +99,24 @@ class OvercookedSparseEnv(CoopEnv):
         self._steps = 0
         return self._encode(self._env.state)
 
+    def _validate_action(self, action) -> int:
+        if isinstance(action, bool) or not isinstance(action, (int, np.integer)):
+            raise ValueError(
+                f"action must be an integer index, got {action!r} ({type(action).__name__})"
+            )
+        index = int(action)
+        if not 0 <= index < self.num_actions:
+            raise ValueError(
+                f"action index {index} out of range [0, {self.num_actions})"
+            )
+        return index
+
     def step(self, actions: list[int]) -> StepResult:
         if len(actions) != self.num_agents:
             raise ValueError(f"expected {self.num_agents} actions, got {len(actions)}")
-        joint_action = tuple(self._Action.INDEX_TO_ACTION[int(a)] for a in actions)
+        joint_action = tuple(
+            self._Action.INDEX_TO_ACTION[self._validate_action(a)] for a in actions
+        )
         next_state, sparse_reward, done, info = self._env.step(joint_action)
         self._steps += 1
 
@@ -137,3 +151,24 @@ class OvercookedSparseEnv(CoopEnv):
     @property
     def steps_elapsed(self) -> int:
         return self._steps
+
+    # -- state serialization (trajectory-faithful resume) -------------------
+
+    def get_state(self) -> dict:
+        """Snapshot the simulator and wrapper counters for exact resume."""
+        import copy
+
+        return {
+            "native_state": copy.deepcopy(self._env.state),
+            "steps": self._steps,
+            "deliveries": self._deliveries,
+        }
+
+    def set_state(self, snapshot: dict) -> tuple[list[np.ndarray], np.ndarray]:
+        """Restore a snapshot taken by :meth:`get_state` mid-episode or not."""
+        import copy
+
+        self._env.state = copy.deepcopy(snapshot["native_state"])
+        self._steps = int(snapshot["steps"])
+        self._deliveries = int(snapshot["deliveries"])
+        return self._encode(self._env.state)

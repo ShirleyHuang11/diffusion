@@ -48,6 +48,48 @@ def test_wrong_action_count_rejected(layout_env):
         layout_env.step([0])
 
 
+@pytest.mark.parametrize(
+    "bad_action",
+    [-1, 6, 1.5, "north", None, True, False],
+    ids=["negative", "too_large", "float", "string", "none", "bool_true", "bool_false"],
+)
+def test_invalid_action_rejected(bad_action):
+    env = OvercookedSparseEnv(layout="cramped_room", horizon=10, encoding="lossless")
+    env.reset()
+    with pytest.raises(ValueError, match="action"):
+        env.step([bad_action, stay_index()])
+
+
+def test_numpy_integer_actions_accepted():
+    env = OvercookedSparseEnv(layout="cramped_room", horizon=10, encoding="lossless")
+    env.reset()
+    result = env.step(np.array([stay_index(), stay_index()], dtype=np.int64))
+    assert isinstance(result.extrinsic_reward, float)
+
+
+def test_state_snapshot_roundtrip():
+    """get_state/set_state restores mid-episode simulator + counter state."""
+    rng = np.random.default_rng(3)
+    env = OvercookedSparseEnv(layout="cramped_room", horizon=50, encoding="lossless")
+    env.reset()
+    for _ in range(17):  # wander mid-episode
+        env.step(rng.integers(0, env.num_actions, size=2).tolist())
+    snap = env.get_state()
+    saved_steps = env.steps_elapsed
+
+    # continue from the snapshot twice with identical actions -> identical streams
+    plan = [rng.integers(0, env.num_actions, size=2).tolist() for _ in range(20)]
+    env.set_state(snap)
+    assert env.steps_elapsed == saved_steps
+    results_a = [env.step(a) for a in plan]
+
+    env.set_state(snap)
+    results_b = [env.step(a) for a in plan]
+
+    assert [r.extrinsic_reward for r in results_a] == [r.extrinsic_reward for r in results_b]
+    assert np.array_equal(results_a[-1].joint_state, results_b[-1].joint_state)
+
+
 def test_termination_at_horizon_without_success(layout_env):
     layout_env.reset()
     result = None

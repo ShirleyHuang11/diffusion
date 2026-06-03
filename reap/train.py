@@ -54,6 +54,7 @@ def run_random(cfg: Config, out_dir: Path, resume: bool) -> dict:
     episodes = 0
     successes = 0
     return_sum = 0.0
+    ep_return = 0.0
     if resume:
         ckpt_path = latest_checkpoint(ckpt_dir)
         if ckpt_path is None:
@@ -63,7 +64,11 @@ def run_random(cfg: Config, out_dir: Path, resume: bool) -> dict:
         episodes = state["episodes"]
         successes = state["successes"]
         return_sum = state["return_sum"]
+        ep_return = state["ep_return"]
         rng.bit_generator.state = state["rng_state"]
+        env.set_state(state["env_snapshot"])  # exact mid-episode continuation
+    else:
+        env.reset(seed=cfg.run.seed)
 
     def snapshot() -> dict:
         return {
@@ -71,16 +76,22 @@ def run_random(cfg: Config, out_dir: Path, resume: bool) -> dict:
             "episodes": episodes,
             "successes": successes,
             "return_sum": return_sum,
+            "ep_return": ep_return,
+            "env_snapshot": env.get_state(),
             "rng_state": rng.bit_generator.state,
             "config": cfg.to_dict(),
         }
 
     start_time = time.monotonic()
     deadline = start_time + cfg.run.max_wall_clock_minutes * 60
-    ep_return = 0.0
-    env.reset(seed=cfg.run.seed)
-    next_log = env_step + cfg.logging.interval_env_steps
-    next_ckpt = env_step + cfg.checkpoint.interval_env_steps
+
+    def next_on_grid(interval: int) -> int:
+        # next multiple of `interval` strictly after env_step, so a resumed run
+        # rejoins the same logging/checkpoint grid as an uninterrupted one
+        return (env_step // interval + 1) * interval
+
+    next_log = next_on_grid(cfg.logging.interval_env_steps)
+    next_ckpt = next_on_grid(cfg.checkpoint.interval_env_steps)
 
     while env_step < cfg.algo.total_env_steps:
         if time.monotonic() > deadline:

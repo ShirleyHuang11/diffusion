@@ -88,6 +88,47 @@ def test_resume_continues_run(tmp_path):
     assert len(keys) == 1
 
 
+def test_resume_is_trajectory_faithful_mid_episode(tmp_path):
+    """Interrupted+resumed runs must reproduce the uninterrupted metric stream
+    exactly, even when the checkpoint lands mid-episode (intervals deliberately
+    not aligned to the episode horizon)."""
+    horizon = 30  # episodes end at 30, 60, 90, 120, 150
+    base = dict(total_steps=150, minutes=10.0)
+
+    cfg_full = make_cfg(tmp_path, name="full", **base)
+    cfg_full = dataclasses.replace(
+        cfg_full,
+        env=dataclasses.replace(cfg_full.env, horizon=horizon),
+        logging=LoggingConfig(interval_env_steps=50),
+        checkpoint=CheckpointConfig(interval_env_steps=75, keep_last=2),  # mid-episode
+    )
+    run_from_config(cfg_full)
+
+    cfg_part = dataclasses.replace(
+        cfg_full,
+        run=dataclasses.replace(cfg_full.run, name="part"),
+        algo=AlgoConfig(name="random", total_env_steps=75),
+    )
+    run_from_config(cfg_part)  # stops at step 75: episode 3 in progress
+    cfg_resumed = dataclasses.replace(
+        cfg_part, algo=AlgoConfig(name="random", total_env_steps=150)
+    )
+    run_from_config(cfg_resumed, resume=True)
+
+    rec_full = deterministic_view(read_jsonl(run_dir(cfg_full) / "metrics.jsonl"))
+    rec_part = deterministic_view(read_jsonl(run_dir(cfg_part) / "metrics.jsonl"))
+    assert rec_part == rec_full  # identical streams incl. episode counters
+
+    from reap.checkpoint import load_checkpoint
+
+    final_full = load_checkpoint(latest_checkpoint(run_dir(cfg_full) / "checkpoints"))
+    final_part = load_checkpoint(latest_checkpoint(run_dir(cfg_part) / "checkpoints"))
+    assert final_full["episodes"] == final_part["episodes"] == 5
+    assert final_full["successes"] == final_part["successes"]
+    assert final_full["return_sum"] == final_part["return_sum"]
+    assert final_full["rng_state"] == final_part["rng_state"]
+
+
 def test_resume_without_checkpoint_fails(tmp_path):
     cfg = make_cfg(tmp_path)
     from reap.config import ConfigError

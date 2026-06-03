@@ -58,3 +58,11 @@ class CoopEnv(abc.ABC):
     @property
     def steps_remaining(self) -> int:
         return self.horizon - self.steps_elapsed
+
+    def get_state(self) -> dict:
+        """Snapshot simulator + wrapper state for trajectory-faithful resume."""
+        raise NotImplementedError(f"{type(self).__name__} does not support state snapshots")
+
+    def set_state(self, snapshot: dict) -> tuple[list[np.ndarray], np.ndarray]:
+        """Restore a :meth:`get_state` snapshot; returns (local obs, joint state)."""
+        raise NotImplementedError(f"{type(self).__name__} does not support state snapshots")
