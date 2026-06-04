@@ -1,25 +1,19 @@
 {
-  "calibration": {
-    "action": "shrink_beta",
-    "beta_after": 0.5,
-    "brier": 0.1669921875,
-    "raw_ece": 0.375
-  },
-  "distill_f_hat": {
-    "mae": 0.004911089381494094,
-    "passed": true
-  },
-  "distill_p_hat": {
-    "mae": 0.007343785131524783,
-    "passed": true
-  },
-  "potential_table": {
-    "phi_range": [
-      0.0,
-      1.0
-    ],
-    "states_passing_gate": 1
-  },
+  "coverage_states": 48,
+  "feasibility_range": [
+    0.0,
+    0.9999999552965164
+  ],
+  "feasibility_use": "gate only \u2014 never a reward magnitude",
+  "phi_bounded_in_unit_interval": true,
+  "phi_range": [
+    0.0,
+    1.0
+  ],
+  "propensity_range": [
+    0.0,
+    1.0
+  ],
   "provenance": {
     "anchors_used": 48,
     "bridge_samples": 4,
@@ -46,14 +40,7 @@
     "teacher_steps": 60000,
     "window": 16
   },
-  "quality": {
-    "bridge_consistency_rate": 1.0,
-    "delivery_preservation_rate": 0.6875,
-    "endpoint_success_rate": 0.020833333333333332,
-    "invalid_state_rate": 0.0,
-    "projection_error_mean": 3.323775917076919,
-    "shaping_enabled": true
-  },
-  "runtime_seconds": 1358.0,
-  "warmup_gate_met": true
+  "states_gated_out": 47,
+  "states_passing_gate": 1,
+  "tau_gate": 0.5
 }

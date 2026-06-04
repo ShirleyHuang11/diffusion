@@ -29,6 +29,14 @@ algo:
     hidden_size: 128
     entropy_coef: 0.02
     quality_report: reports/teacher_quality_hybrid_forced.json
+    predictors: runs/teacher_hybrid_forced/predictors.pt
+    calibration_payload: runs/teacher_hybrid_forced/calibration_holdout.npz
+    teacher: runs/teacher_hybrid_forced/teacher.pt
+    probe_observations: runs/teacher_hybrid_forced/probe_observations.npy
+    refresh_mode: policy_conditioned
+    # ~24 policy-conditioned refreshes across the 4882-update run; teacher
+    # queries run on the GPU node assigned to this arm
+    refresh_every_k_updates: 200
 
 logging:
   interval_env_steps: 25000

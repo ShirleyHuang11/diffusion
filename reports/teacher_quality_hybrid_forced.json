@@ -1,17 +1,42 @@
 {
-  "gate_violations": [
-    "warmup ladder collected 0 successful episodes (< required 25) within 120000 env steps; teacher training must not proceed on this scope"
-  ],
+  "bridge_consistency_rate": 1.0,
+  "delivery_preservation_rate": 0.6875,
+  "endpoint_success_rate": 0.020833333333333332,
+  "gate_violations": [],
+  "gates": {
+    "bridge_consistency_min": 0.8,
+    "invalid_state_rate_max": 0.1
+  },
+  "invalid_state_rate": 0.0,
+  "pin_start_preservation": "exact by construction (projection starts at the pinned lossless state)",
+  "projection_error_mean": 3.323775917076919,
+  "projection_method": "deterministic simulator-rollout projection: from the pinned lossless start (decode_if_roundtrip), each window step replays the joint action whose exact mdp successor minimizes L2 distance to the sampled next feature vector; projected lossless windows are valid and consistent by construction, so teacher quality is measured by projection error and delivery preservation",
   "provenance": {
-    "halt_reason": "warmup ladder collected 0 successful episodes (< required 25) within 120000 env steps; teacher training must not proceed on this scope",
+    "anchors_used": 48,
+    "bridge_samples": 4,
+    "d_model": 256,
+    "device": "cuda",
+    "episodes_holdout": 35,
+    "episodes_train": 140,
+    "feature_dim": 193,
+    "gpu_name": "NVIDIA RTX A6000",
     "horizon": 400,
     "ladder_checkpoints": {
-      "mappo_rnd": "None",
+      "mappo_rnd": "runs/first_integration_rnd_forced/seed0",
       "mappo_vanilla": "runs/hardness_mappo_forced/seed0"
     },
     "layout": "forced_coordination",
-    "scope": "hybrid features-encoding teacher (forced_coordination)",
-    "seed": 0
+    "lossless_dim": 651,
+    "nhead": 8,
+    "num_layers": 6,
+    "samples_per_state": 8,
+    "scope": "hybrid features-encoding teacher",
+    "seed": 0,
+    "teacher_loss_first20": 1.0396231532096862,
+    "teacher_loss_last20": 0.008057571621611715,
+    "teacher_steps": 60000,
+    "window": 16
   },
-  "shaping_enabled": false
+  "raw_feature_sample_count": 384,
+  "shaping_enabled": true
 }

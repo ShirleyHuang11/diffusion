@@ -1,0 +1,111 @@
+{
+  "action": "shrink_beta",
+  "alert": false,
+  "beta_after": 0.5,
+  "beta_before": 1.0,
+  "bins": [
+    {
+      "count": 1,
+      "hi": 0.1,
+      "lo": 0.0,
+      "predicted_mean": 0.0,
+      "realized_mean": 0.0
+    },
+    {
+      "count": 3,
+      "hi": 0.2,
+      "lo": 0.1,
+      "predicted_mean": 0.125,
+      "realized_mean": 0.0
+    },
+    {
+      "count": 8,
+      "hi": 0.30000000000000004,
+      "lo": 0.2,
+      "predicted_mean": 0.25,
+      "realized_mean": 0.0
+    },
+    {
+      "count": 7,
+      "hi": 0.4,
+      "lo": 0.30000000000000004,
+      "predicted_mean": 0.375,
+      "realized_mean": 0.0
+    },
+    {
+      "count": 0,
+      "hi": 0.5,
+      "lo": 0.4,
+      "predicted_mean": null,
+      "realized_mean": null
+    },
+    {
+      "count": 9,
+      "hi": 0.6000000000000001,
+      "lo": 0.5,
+      "predicted_mean": 0.5,
+      "realized_mean": 0.0
+    },
+    {
+      "count": 4,
+      "hi": 0.7000000000000001,
+      "lo": 0.6000000000000001,
+      "predicted_mean": 0.625,
+      "realized_mean": 0.0
+    },
+    {
+      "count": 0,
+      "hi": 0.8,
+      "lo": 0.7000000000000001,
+      "predicted_mean": null,
+      "realized_mean": null
+    },
+    {
+      "count": 0,
+      "hi": 0.9,
+      "lo": 0.8,
+      "predicted_mean": null,
+      "realized_mean": null
+    },
+    {
+      "count": 0,
+      "hi": 1.0,
+      "lo": 0.9,
+      "predicted_mean": null,
+      "realized_mean": null
+    }
+  ],
+  "brier": 0.1669921875,
+  "ece_gate": 0.15,
+  "holdout_anchors": 32,
+  "holdout_disjointness": "episode-level split; holdout episodes never enter teacher training windows",
+  "post_isotonic_ece": 0.0,
+  "post_isotonic_resolution": 0.0,
+  "provenance": {
+    "anchors_used": 48,
+    "bridge_samples": 4,
+    "d_model": 256,
+    "device": "cuda",
+    "episodes_holdout": 35,
+    "episodes_train": 140,
+    "feature_dim": 193,
+    "gpu_name": "NVIDIA RTX A6000",
+    "horizon": 400,
+    "ladder_checkpoints": {
+      "mappo_rnd": "runs/first_integration_rnd_forced/seed0",
+      "mappo_vanilla": "runs/hardness_mappo_forced/seed0"
+    },
+    "layout": "forced_coordination",
+    "lossless_dim": 651,
+    "nhead": 8,
+    "num_layers": 6,
+    "samples_per_state": 8,
+    "scope": "hybrid features-encoding teacher",
+    "seed": 0,
+    "teacher_loss_first20": 1.0396231532096862,
+    "teacher_loss_last20": 0.008057571621611715,
+    "teacher_steps": 60000,
+    "window": 16
+  },
+  "raw_ece": 0.375
+}
