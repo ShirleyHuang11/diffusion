@@ -370,6 +370,12 @@ def run_pipeline(
         "episodes_holdout": len(holdout_episodes),
     }
 
+    # stamp provenance into the warmup artifact as soon as it is known
+    warmup_path = reports_dir / "warmup_buffer_cramped.json"
+    warmup_artifact = json.loads(warmup_path.read_text())
+    warmup_artifact["provenance"] = provenance
+    warmup_path.write_text(json.dumps(warmup_artifact, indent=2, sort_keys=True))
+
     # anchors for measurement: training-side for quality, holdout for calibration;
     # deduplicate by state key so the signal table covers unique states
     from reap.signals.potential import state_key
@@ -533,12 +539,6 @@ def run_pipeline(
         artifact = json.loads((reports_dir / name).read_text())
         if "provenance" not in artifact or not artifact["provenance"]:
             raise RuntimeError(f"pipeline artifact {name} lacks provenance")
-
-    # stamp provenance into the warmup artifact as well
-    warmup_path = reports_dir / "warmup_buffer_cramped.json"
-    warmup_artifact = json.loads(warmup_path.read_text())
-    warmup_artifact["provenance"] = provenance
-    warmup_path.write_text(json.dumps(warmup_artifact, indent=2, sort_keys=True))
 
     summary = {
         "provenance": provenance,
