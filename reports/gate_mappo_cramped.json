@@ -1,4 +1,11 @@
 {
+  "expected_env_steps": 5000000,
+  "expected_seeds": [
+    0,
+    1,
+    2
+  ],
+  "extra_seeds_ignored": [],
   "gate_passed": false,
   "metric_basis": "extrinsic channel only (task success rate, episode return)",
   "run_name": "gate_mappo_cramped",

@@ -69,6 +69,8 @@ def collect_warmup(
 
     buffer = TrajectoryBuffer(env.joint_state_dim)
     steps_per_rung = max(1, max_env_steps // len(ladder))
+    total_steps = 0
+    truncated_collection = False
 
     for rung_name, policy in ladder:
         rung_steps = 0
@@ -78,16 +80,23 @@ def collect_warmup(
             ep_return = 0.0
             success = False
             while True:
+                if total_steps >= max_env_steps:  # hard global cap, even mid-episode
+                    truncated_collection = True
+                    break
                 result = env.step(policy(local_obs, joint))
                 rung_steps += 1
+                total_steps += 1
                 states.append(result.joint_state)
                 ep_return += result.extrinsic_reward
                 local_obs, joint = result.local_obs, result.joint_state
                 if result.terminated or result.truncated:
                     success = bool(result.info.get("success", False))
                     break
-            buffer.add_episode(np.stack(states), ep_return, success, source=rung_name)
-        if buffer.success_count >= min_successes:
+            if len(states) >= 2:  # a capped partial episode is still useful data
+                buffer.add_episode(np.stack(states), ep_return, success, source=rung_name)
+            if truncated_collection:
+                break
+        if truncated_collection or buffer.success_count >= min_successes:
             break
 
     report = buffer.report()
@@ -96,6 +105,7 @@ def collect_warmup(
         "max_env_steps": max_env_steps,
         "met": buffer.success_count >= min_successes,
         "ladder": [name for name, _ in ladder],
+        "collection_truncated_at_cap": truncated_collection,
     }
     if report_path is not None:
         report_path = Path(report_path)

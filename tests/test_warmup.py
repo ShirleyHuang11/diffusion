@@ -99,6 +99,31 @@ def test_warmup_zero_success_halts_with_diagnostic(tmp_path):
     assert report_path.is_file()
 
 
+def test_warmup_cap_is_exact_even_mid_episode(tmp_path):
+    """Budget cap smaller than one episode horizon: collection stops at the
+    cap exactly and records the truncation (regression for cap overshoot)."""
+    env = ChainEnv(length=4, horizon=6)
+    with pytest.raises(WarmupGateError) as excinfo:
+        collect_warmup(
+            env,
+            ladder=[("stayer", always_stay)],
+            min_successes=1,
+            max_env_steps=1,  # far below horizon 6
+            report_path=tmp_path / "warmup.json",
+        )
+    report = excinfo.value.report
+    assert report["total_env_steps"] == 1  # exact stop, no overshoot
+    assert report["gate"]["collection_truncated_at_cap"] is True
+
+
+def test_warmup_cap_not_marked_truncated_when_gate_met():
+    env = ChainEnv(length=4, horizon=10)
+    _, report = collect_warmup(
+        env, ladder=[("solver", always_right)], min_successes=2, max_env_steps=1000
+    )
+    assert report["gate"]["collection_truncated_at_cap"] is False
+
+
 def test_warmup_rejects_empty_ladder():
     env = ChainEnv()
     with pytest.raises(ValueError, match="ladder"):
