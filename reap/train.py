@@ -176,6 +176,10 @@ def run_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
         logger.log(
             trainer.env_step,
             extrinsic=trainer.episode_stats(),
+            shaped={
+                "term_mean": float(rollout["shaping"].mean()),
+                "term_abs_max": float(np.abs(rollout["shaping"]).max()),
+            },
             intrinsic={
                 "bonus_mean": float(rollout["intrinsic"].mean()),
                 **{k: v for k, v in rollout["bonus_diag"].items()},

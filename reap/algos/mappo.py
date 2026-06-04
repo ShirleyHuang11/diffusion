@@ -37,6 +37,8 @@ DEFAULT_PARAMS = {
     "hidden_size": 128,
     "intrinsic": "none",  # none | rnd | count
     "intrinsic_coef": 0.0,
+    "shaping_potential": "",  # provider name from reap.shaping.hand; "" = off
+    "shaping_beta": 0.0,
     "episode_window": 100,  # rolling window for reported episode stats
 }
 
@@ -95,6 +97,15 @@ class MappoTrainer:
         )
         self.optimizer = torch.optim.Adam(self.nets.parameters(), lr=self.p["lr"])
         self.bonus = make_bonus(self.p["intrinsic"], env.joint_state_dim)
+        self.potential_fn = None
+        if self.p["shaping_potential"]:
+            from reap.shaping.hand import make_hand_potential
+
+            if self.p["shaping_beta"] < 0:
+                raise ValueError("shaping_beta must be non-negative")
+            self.potential_fn = make_hand_potential(self.p["shaping_potential"])
+        elif self.p["shaping_beta"]:
+            raise ValueError("shaping_beta set but no shaping_potential configured")
 
         self.env_step = 0
         self.updates = 0
@@ -129,6 +140,7 @@ class MappoTrainer:
         actions = np.empty((T, N), dtype=np.int64)
         logps = np.empty((T, N), dtype=np.float32)
         extrinsic = np.empty(T, dtype=np.float32)
+        shaping = np.zeros(T, dtype=np.float32)
         dones = np.empty(T, dtype=np.float32)
         values = np.empty(T, dtype=np.float32)
 
@@ -140,12 +152,24 @@ class MappoTrainer:
                 values[t] = self.nets.value(self._joint)
             actions[t] = acts
             logps[t] = lps
+            if self.potential_fn is not None:
+                phi_s = self.potential_fn(self.env, self._joint, self.env.steps_remaining)
             result = self.env.step(acts.tolist())
             self.env_step += 1
             extrinsic[t] = result.extrinsic_reward
             done = result.terminated or result.truncated
             dones[t] = float(done)
             next_joints[t] = result.joint_state
+            if self.potential_fn is not None:
+                # potential at any episode end is zero (termination and timeout)
+                phi_next = (
+                    0.0
+                    if done
+                    else self.potential_fn(
+                        self.env, result.joint_state, self.env.steps_remaining
+                    )
+                )
+                shaping[t] = self.p["shaping_beta"] * (self.gamma * phi_next - phi_s)
             self._ep_return += result.extrinsic_reward
 
             if done:
@@ -171,6 +195,7 @@ class MappoTrainer:
             "logps": logps,
             "extrinsic": extrinsic,
             "intrinsic": intrinsic.astype(np.float32),
+            "shaping": shaping,
             "dones": dones,
             "values": values,
             "last_value": last_value,
@@ -194,7 +219,7 @@ class MappoTrainer:
     def update(self, rollout: dict) -> dict:
         """One PPO update on a collected rollout; returns loss diagnostics."""
         T, N = len(rollout["extrinsic"]), self.env.num_agents
-        rewards = rollout["extrinsic"] + rollout["intrinsic"]
+        rewards = rollout["extrinsic"] + rollout["intrinsic"] + rollout["shaping"]
         advantages, returns = self._gae(
             rewards, rollout["dones"], rollout["values"], rollout["last_value"]
         )

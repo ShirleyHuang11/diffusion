@@ -152,6 +152,39 @@ class OvercookedSparseEnv(CoopEnv):
     def steps_elapsed(self) -> int:
         return self._steps
 
+    def progress_potential(self) -> float:
+        """Hand-crafted, bounded task-progress proxy from the native state.
+
+        Counts ingredients loaded into soups, ready soups, and held
+        dishes/soups — a monotone "closer to a delivery" signal used only as
+        a sanity-check shaping potential, never as a measurement. Weights are
+        documented in the invariance report. Range: [0, ~1.5].
+        """
+        state = self._env.state
+        ingredients_loaded = 0
+        soups_ready = 0
+        for obj in state.objects.values():
+            if obj.name == "soup":
+                if getattr(obj, "is_ready", False):
+                    soups_ready += 1
+                else:
+                    ingredients_loaded += len(getattr(obj, "ingredients", []) or [])
+        held_dish = 0
+        held_soup = 0
+        for player in state.players:
+            held = player.held_object
+            if held is not None:
+                if held.name == "dish":
+                    held_dish += 1
+                elif held.name == "soup":
+                    held_soup += 1
+        return (
+            0.05 * min(ingredients_loaded, 6)
+            + 0.30 * min(soups_ready, 2)
+            + 0.15 * min(held_dish, 2)
+            + 0.50 * min(held_soup, 2)
+        )
+
     # -- state serialization (trajectory-faithful resume) -------------------
 
     def get_state(self) -> dict:

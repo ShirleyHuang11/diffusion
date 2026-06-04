@@ -37,6 +37,8 @@ class ReapPotential(Potential):
         for s, p, f in zip(states, propensity, feasibility):
             if not 0 <= p <= 1:
                 raise ValueError(f"propensity {p} outside [0, 1]")
+            if not 0 <= f <= 1:
+                raise ValueError(f"feasibility {f} outside [0, 1]")
             key = state_key(s, self.precision)
             self._propensity[key] = float(p)
             self._feasibility[key] = float(f)

@@ -164,3 +164,7 @@ def test_reap_potential_validation():
         potential.update_tables(
             np.eye(2, dtype=np.float32), np.array([1.2, 0.5]), np.array([0.5, 0.5])
         )
+    with pytest.raises(ValueError, match="feasibility"):
+        potential.update_tables(
+            np.eye(2, dtype=np.float32), np.array([0.5, 0.5]), np.array([0.5, -0.1])
+        )
