@@ -216,9 +216,144 @@ def run_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
     return {"env_step": trainer.env_step, **final}
 
 
+def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
+    """MAPPO with REAP shaping under snapshot pinning and gated enablement.
+
+    Shaping is enabled only when the committed teacher-quality artifact passed
+    its gates; otherwise the controller produces zero shaping terms and the
+    gate reason is logged. Predictors (p-hat/f-hat) come from the teacher
+    pipeline output directory.
+    """
+    import json
+
+    from reap.algos.mappo import MappoTrainer
+    from reap.algos.reap_shaping import (
+        PredictorPotential,
+        ReapShapingController,
+    )
+    from reap.calibration import CalibrationLadder
+    from reap.signals.distill import DistilledPredictor
+
+    params = dict(cfg.algo.params)
+    quality_path = params.pop("quality_report", "reports/teacher_quality_cramped.json")
+    predictors_path = params.pop("predictors", "runs/teacher_cramped/predictors.pt")
+    refresh_every = int(params.pop("refresh_every_k_updates", 50))
+    beta = float(params.pop("reap_beta", 1.0))
+    tau_gate = float(params.pop("tau_gate", 0.5))
+
+    env = make_env(cfg.env.id, **_env_kwargs(cfg))
+    trainer = MappoTrainer(env, params, seed=cfg.run.seed)
+
+    quality = json.loads(Path(quality_path).read_text())
+    import torch as _torch
+
+    predictor_state = _torch.load(predictors_path, map_location="cpu", weights_only=False)
+    state_dim = len(predictor_state["p_hat"]["input_mean"])
+    p_hat = DistilledPredictor(state_dim, hidden=predictor_state["p_hat"]["net"]["0.weight"].shape[0])
+    p_hat.load_state_dict(predictor_state["p_hat"])
+    f_hat = DistilledPredictor(state_dim, hidden=predictor_state["f_hat"]["net"]["0.weight"].shape[0])
+    f_hat.load_state_dict(predictor_state["f_hat"])
+
+    events_path = out_dir / "shaping_events.jsonl"
+
+    def event_sink(event: dict) -> None:  # events land on disk as they occur
+        with events_path.open("a") as fh:
+            fh.write(json.dumps(event, sort_keys=True) + "\n")
+
+    controller = ReapShapingController(
+        potential=PredictorPotential(p_hat, f_hat, tau_gate),
+        ladder=CalibrationLadder(beta=beta),
+        quality_report=quality,
+        refresh_every_updates=refresh_every,
+        event_sink=event_sink,
+    )
+    trainer.shaping_provider = controller
+
+    logger = MetricsLogger(out_dir, jsonl=cfg.logging.jsonl, csv_enabled=cfg.logging.csv)
+    ckpt_dir = out_dir / "checkpoints"
+    if resume:
+        ckpt_path = latest_checkpoint(ckpt_dir)
+        if ckpt_path is None:
+            raise ConfigError(f"--resume requested but no checkpoint found in {ckpt_dir}")
+        payload = load_checkpoint(ckpt_path)
+        trainer.load_state_dict(payload["trainer"])
+        controller.load_state_dict(payload["controller"])
+
+    start_time = time.monotonic()
+    deadline = start_time + cfg.run.max_wall_clock_minutes * 60
+
+    def grid_next(interval: int) -> int:
+        return (trainer.env_step // interval + 1) * interval
+
+    next_log = grid_next(cfg.logging.interval_env_steps)
+    next_ckpt = grid_next(cfg.checkpoint.interval_env_steps)
+
+    def save() -> None:
+        save_checkpoint(
+            {
+                "trainer": trainer.state_dict(),
+                "controller": controller.state_dict(),
+                "config": cfg.to_dict(),
+            },
+            ckpt_dir / checkpoint_name(trainer.env_step),
+        )
+        prune_checkpoints(ckpt_dir, cfg.checkpoint.keep_last)
+
+    def gpu_mem_mb() -> float:
+        import torch as _t
+
+        if _t.cuda.is_available():
+            return float(_t.cuda.max_memory_allocated() / 1e6)
+        return 0.0
+
+    last_logged = -1
+    rollout: dict | None = None
+    diags: dict = {}
+    while trainer.env_step < cfg.algo.total_env_steps:
+        if time.monotonic() > deadline:
+            save()
+            raise WallClockExceeded(
+                f"run exceeded max_wall_clock_minutes={cfg.run.max_wall_clock_minutes}"
+            )
+        controller.maybe_refresh(trainer.updates)
+        remaining = cfg.algo.total_env_steps - trainer.env_step
+        rollout = trainer.collect_rollout(max_steps=remaining)
+        diags = trainer.update(rollout)
+
+        if trainer.env_step >= next_log:
+            logger.log(
+                trainer.env_step,
+                extrinsic=trainer.episode_stats(),
+                shaped={
+                    "term_mean": float(rollout["shaping"].mean()),
+                    "term_abs_max": float(np.abs(rollout["shaping"]).max()),
+                    "snapshot_id": float(rollout["shaping_snapshot"] or 0),
+                    "enabled": float(controller.enabled),
+                },
+                intrinsic={"bonus_mean": float(rollout["intrinsic"].mean())},
+                diag={
+                    **diags,
+                    "updates": float(trainer.updates),
+                    "refresh_count": float(controller.refresh_count),
+                    "wall_time_s": time.monotonic() - start_time,
+                    "gpu_mem_mb": gpu_mem_mb(),
+                },
+            )
+            last_logged = trainer.env_step
+            next_log = grid_next(cfg.logging.interval_env_steps)
+        if trainer.env_step >= next_ckpt:
+            save()
+            next_ckpt = grid_next(cfg.checkpoint.interval_env_steps)
+
+    save()
+    return {"env_step": trainer.env_step, **trainer.episode_stats(),
+            "shaping_enabled": controller.enabled}
+
+
 RUNNERS = {
     "random": run_random,
     "mappo": run_mappo,
+    "reap_mappo": run_reap_mappo,
 }
 
 

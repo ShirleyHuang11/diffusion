@@ -134,6 +134,15 @@ class MappoTrainer:
             T = min(T, int(max_steps))
         if T <= 0:
             raise ValueError(f"rollout length must be positive, got {T}")
+
+        # an external shaping provider (the REAP controller) pins one immutable
+        # potential snapshot for this entire batch; the hand-potential path
+        # keeps the trainer's own potential_fn and configured beta
+        provider = getattr(self, "shaping_provider", None)
+        snapshot_ctx = provider.pin() if provider is not None else None
+        snapshot = snapshot_ctx.__enter__() if snapshot_ctx is not None else None
+        potential_fn = snapshot.value if snapshot is not None else self.potential_fn
+        shaping_beta = snapshot.beta if snapshot is not None else self.p["shaping_beta"]
         local_obs = np.empty((T, N, self.env.local_obs_dim), dtype=np.float32)
         joint_states = np.empty((T, self.env.joint_state_dim), dtype=np.float32)
         next_joints = np.empty_like(joint_states)
@@ -144,44 +153,48 @@ class MappoTrainer:
         dones = np.empty(T, dtype=np.float32)
         values = np.empty(T, dtype=np.float32)
 
-        for t in range(T):
-            local_obs[t] = np.asarray(self._obs)
-            joint_states[t] = self._joint
-            with torch.no_grad():
-                acts, lps = self.nets.act(self._obs)
-                values[t] = self.nets.value(self._joint)
-            actions[t] = acts
-            logps[t] = lps
-            if self.potential_fn is not None:
-                phi_s = self.potential_fn(self.env, self._joint, self.env.steps_remaining)
-            result = self.env.step(acts.tolist())
-            self.env_step += 1
-            extrinsic[t] = result.extrinsic_reward
-            done = result.terminated or result.truncated
-            dones[t] = float(done)
-            next_joints[t] = result.joint_state
-            if self.potential_fn is not None:
-                # potential at any episode end is zero (termination and timeout)
-                phi_next = (
-                    0.0
-                    if done
-                    else self.potential_fn(
-                        self.env, result.joint_state, self.env.steps_remaining
+        try:
+            for t in range(T):
+                local_obs[t] = np.asarray(self._obs)
+                joint_states[t] = self._joint
+                with torch.no_grad():
+                    acts, lps = self.nets.act(self._obs)
+                    values[t] = self.nets.value(self._joint)
+                actions[t] = acts
+                logps[t] = lps
+                if potential_fn is not None:
+                    phi_s = potential_fn(self.env, self._joint, self.env.steps_remaining)
+                result = self.env.step(acts.tolist())
+                self.env_step += 1
+                extrinsic[t] = result.extrinsic_reward
+                done = result.terminated or result.truncated
+                dones[t] = float(done)
+                next_joints[t] = result.joint_state
+                if potential_fn is not None:
+                    # potential at any episode end is zero (termination and timeout)
+                    phi_next = (
+                        0.0
+                        if done
+                        else potential_fn(
+                            self.env, result.joint_state, self.env.steps_remaining
+                        )
                     )
-                )
-                shaping[t] = self.p["shaping_beta"] * (self.gamma * phi_next - phi_s)
-            self._ep_return += result.extrinsic_reward
+                    shaping[t] = shaping_beta * (self.gamma * phi_next - phi_s)
+                self._ep_return += result.extrinsic_reward
 
-            if done:
-                self.episodes += 1
-                success = bool(result.info.get("success", False))
-                self.successes += int(success)
-                self._recent_returns.append(self._ep_return)
-                self._recent_successes.append(float(success))
-                self._ep_return = 0.0
-                self._obs, self._joint = self.env.reset()
-            else:
-                self._obs, self._joint = result.local_obs, result.joint_state
+                if done:
+                    self.episodes += 1
+                    success = bool(result.info.get("success", False))
+                    self.successes += int(success)
+                    self._recent_returns.append(self._ep_return)
+                    self._recent_successes.append(float(success))
+                    self._ep_return = 0.0
+                    self._obs, self._joint = self.env.reset()
+                else:
+                    self._obs, self._joint = result.local_obs, result.joint_state
+        finally:
+            if snapshot_ctx is not None:
+                snapshot_ctx.__exit__(None, None, None)
 
         intrinsic = self.bonus.compute(joint_states) * self.p["intrinsic_coef"]
         bonus_diag = self.bonus.update(joint_states)
@@ -200,6 +213,7 @@ class MappoTrainer:
             "values": values,
             "last_value": last_value,
             "bonus_diag": bonus_diag,
+            "shaping_snapshot": snapshot.snapshot_id if snapshot is not None else None,
         }
 
     # -- learning ----------------------------------------------------------
