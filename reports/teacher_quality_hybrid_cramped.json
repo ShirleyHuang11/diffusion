@@ -1,0 +1,42 @@
+{
+  "bridge_consistency_rate": 1.0,
+  "delivery_preservation_rate": 0.8072916666666666,
+  "endpoint_success_rate": 0.0026041666666666665,
+  "gate_violations": [],
+  "gates": {
+    "bridge_consistency_min": 0.8,
+    "invalid_state_rate_max": 0.1
+  },
+  "invalid_state_rate": 0.0,
+  "pin_start_preservation": "exact by construction (projection starts at the pinned lossless state)",
+  "projection_error_mean": 5.930476441557727,
+  "projection_method": "deterministic simulator-rollout projection: from the pinned lossless start (decode_if_roundtrip), each window step replays the joint action whose exact mdp successor minimizes L2 distance to the sampled next feature vector; projected lossless windows are valid and consistent by construction, so teacher quality is measured by projection error and delivery preservation",
+  "provenance": {
+    "anchors_used": 48,
+    "bridge_samples": 4,
+    "d_model": 256,
+    "device": "cuda",
+    "episodes_holdout": 35,
+    "episodes_train": 140,
+    "feature_dim": 193,
+    "gpu_name": "NVIDIA H200",
+    "horizon": 400,
+    "ladder_checkpoints": {
+      "mappo_rnd": "runs/probe_mappo_rnd_cramped/seed0",
+      "mappo_vanilla": "runs/gate_mappo_cramped/seed0"
+    },
+    "layout": "cramped_room",
+    "lossless_dim": 521,
+    "nhead": 8,
+    "num_layers": 6,
+    "samples_per_state": 8,
+    "scope": "hybrid features-encoding teacher",
+    "seed": 0,
+    "teacher_loss_first20": 1.047045075893402,
+    "teacher_loss_last20": 0.008342203288339078,
+    "teacher_steps": 60000,
+    "window": 16
+  },
+  "raw_feature_sample_count": 384,
+  "shaping_enabled": true
+}

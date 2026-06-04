@@ -1,0 +1,38 @@
+{
+  "holdout_states": 12,
+  "mae": 0.008638689042224238,
+  "mae_max": 0.1,
+  "max_abs_error": 0.044577181339263916,
+  "passed": true,
+  "predictor_hidden": 256,
+  "provenance": {
+    "anchors_used": 48,
+    "bridge_samples": 4,
+    "d_model": 256,
+    "device": "cuda",
+    "distill_epochs": 600,
+    "distill_hidden": 256,
+    "distill_holdout_states": 12,
+    "distill_train_states": 36,
+    "episodes_holdout": 35,
+    "episodes_train": 140,
+    "feature_dim": 193,
+    "gpu_name": "NVIDIA H200",
+    "horizon": 400,
+    "ladder_checkpoints": {
+      "mappo_rnd": "runs/probe_mappo_rnd_cramped/seed0",
+      "mappo_vanilla": "runs/gate_mappo_cramped/seed0"
+    },
+    "layout": "cramped_room",
+    "lossless_dim": 521,
+    "nhead": 8,
+    "num_layers": 6,
+    "samples_per_state": 8,
+    "scope": "hybrid features-encoding teacher",
+    "seed": 0,
+    "teacher_loss_first20": 1.047045075893402,
+    "teacher_loss_last20": 0.008342203288339078,
+    "teacher_steps": 60000,
+    "window": 16
+  }
+}

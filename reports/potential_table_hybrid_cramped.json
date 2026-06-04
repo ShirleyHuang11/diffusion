@@ -1,0 +1,46 @@
+{
+  "coverage_states": 48,
+  "feasibility_range": [
+    0.0,
+    0.5037026107311249
+  ],
+  "feasibility_use": "gate only \u2014 never a reward magnitude",
+  "phi_bounded_in_unit_interval": true,
+  "phi_range": [
+    0.0,
+    0.125
+  ],
+  "propensity_range": [
+    0.0,
+    0.125
+  ],
+  "provenance": {
+    "anchors_used": 48,
+    "bridge_samples": 4,
+    "d_model": 256,
+    "device": "cuda",
+    "episodes_holdout": 35,
+    "episodes_train": 140,
+    "feature_dim": 193,
+    "gpu_name": "NVIDIA H200",
+    "horizon": 400,
+    "ladder_checkpoints": {
+      "mappo_rnd": "runs/probe_mappo_rnd_cramped/seed0",
+      "mappo_vanilla": "runs/gate_mappo_cramped/seed0"
+    },
+    "layout": "cramped_room",
+    "lossless_dim": 521,
+    "nhead": 8,
+    "num_layers": 6,
+    "samples_per_state": 8,
+    "scope": "hybrid features-encoding teacher",
+    "seed": 0,
+    "teacher_loss_first20": 1.047045075893402,
+    "teacher_loss_last20": 0.008342203288339078,
+    "teacher_steps": 60000,
+    "window": 16
+  },
+  "states_gated_out": 47,
+  "states_passing_gate": 1,
+  "tau_gate": 0.5
+}

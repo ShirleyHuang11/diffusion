@@ -1,0 +1,59 @@
+{
+  "calibration": {
+    "action": "shrink_beta",
+    "beta_after": 0.5,
+    "brier": 0.189453125,
+    "raw_ece": 0.4140625
+  },
+  "distill_f_hat": {
+    "mae": 0.008638689042224238,
+    "passed": true
+  },
+  "distill_p_hat": {
+    "mae": 0.0021019661653554067,
+    "passed": true
+  },
+  "potential_table": {
+    "phi_range": [
+      0.0,
+      0.125
+    ],
+    "states_passing_gate": 1
+  },
+  "provenance": {
+    "anchors_used": 48,
+    "bridge_samples": 4,
+    "d_model": 256,
+    "device": "cuda",
+    "episodes_holdout": 35,
+    "episodes_train": 140,
+    "feature_dim": 193,
+    "gpu_name": "NVIDIA H200",
+    "horizon": 400,
+    "ladder_checkpoints": {
+      "mappo_rnd": "runs/probe_mappo_rnd_cramped/seed0",
+      "mappo_vanilla": "runs/gate_mappo_cramped/seed0"
+    },
+    "layout": "cramped_room",
+    "lossless_dim": 521,
+    "nhead": 8,
+    "num_layers": 6,
+    "samples_per_state": 8,
+    "scope": "hybrid features-encoding teacher",
+    "seed": 0,
+    "teacher_loss_first20": 1.047045075893402,
+    "teacher_loss_last20": 0.008342203288339078,
+    "teacher_steps": 60000,
+    "window": 16
+  },
+  "quality": {
+    "bridge_consistency_rate": 1.0,
+    "delivery_preservation_rate": 0.8072916666666666,
+    "endpoint_success_rate": 0.0026041666666666665,
+    "invalid_state_rate": 0.0,
+    "projection_error_mean": 5.930476441557727,
+    "shaping_enabled": true
+  },
+  "runtime_seconds": 928.2,
+  "warmup_gate_met": true
+}
