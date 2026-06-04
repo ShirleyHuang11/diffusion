@@ -90,79 +90,109 @@ def window_success(endpoint: np.ndarray, start: np.ndarray) -> bool:
     return bool(endpoint[-1] - start[-1] >= 0.5 * DELIVERY_SCALE)
 
 
-class OvercookedLosslessValidator(StateValidator):
-    """Structural validity for augmented lossless-grid states.
+class OvercookedExactValidator(StateValidator):
+    """Exact validity for augmented lossless-grid states.
 
-    Built from the training buffer: per-channel value ranges, the set of
-    static channels (identical across all training states, e.g. counters and
-    dispensers), and the player-location channels which must be one-hot.
-    ``project`` rounds and clips; ``is_valid`` checks structure WITHOUT
-    forcing it, so the invalid-state rate stays a meaningful measurement.
+    ``project`` rounds the grid part to integers (clipped to training-data
+    channel ranges) and the delivery feature to the nearest count multiple.
+    ``is_valid`` is exact by construction: the grid must decode to a native
+    OvercookedState whose re-encoding reproduces the grid (urgency layer
+    excluded — it only reflects the unobserved timestep).
     """
 
-    def __init__(self, training_states: np.ndarray, grid_shape: tuple[int, int, int]):
-        self.grid_shape = grid_shape  # (H, W, C) of the unaugmented encoding
+    method = "simulator-decode roundtrip (decode_lossless -> re-encode identity)"
+
+    def __init__(self, training_states: np.ndarray, grid_shape, mdp):
+        self.grid_shape = tuple(grid_shape)
         self.grid_size = int(np.prod(grid_shape))
+        self.mdp = mdp
         flat = np.asarray(training_states, dtype=np.float64)
         self.low = flat.min(axis=0)
         self.high = flat.max(axis=0)
-        self.static_mask = self.low == self.high  # constant across training data
-        self.static_values = self.low.copy()
 
     def project(self, states: np.ndarray) -> np.ndarray:
         states = np.asarray(states, dtype=np.float64)
-        projected = np.clip(np.round(states), self.low, self.high)
-        return projected
-
-    def _grids(self, states: np.ndarray) -> np.ndarray:
-        return states[:, : self.grid_size].reshape(-1, *self.grid_shape)
+        projected = states.copy()
+        projected[:, : self.grid_size] = np.round(projected[:, : self.grid_size])
+        projected[:, self.grid_size :] = (
+            np.round(projected[:, self.grid_size :] / DELIVERY_SCALE) * DELIVERY_SCALE
+        )
+        return np.clip(projected, self.low, self.high)
 
     def is_valid(self, states: np.ndarray) -> np.ndarray:
+        from reap.envs.overcooked_decode import roundtrip_valid
+
         states = np.asarray(states, dtype=np.float64)
-        ok = np.ones(len(states), dtype=bool)
-        # static channels must match the layout constants
-        static_diff = np.abs(states[:, self.static_mask] - self.static_values[self.static_mask])
-        ok &= (static_diff < 1e-6).all(axis=1)
-        # each player-location channel holds exactly one cell
-        grids = self._grids(states)
-        for channel in (0, 1):
-            player = grids[..., channel].reshape(len(states), -1)
-            ok &= np.isclose(player.sum(axis=1), 1.0) & np.isclose(player.max(axis=1), 1.0)
+        ok = np.empty(len(states), dtype=bool)
+        for i, flat in enumerate(states):
+            grid = flat[: self.grid_size].reshape(*self.grid_shape)
+            count_ok = (
+                abs(flat[-1] / DELIVERY_SCALE - round(flat[-1] / DELIVERY_SCALE)) < 1e-6
+                and flat[-1] >= -1e-6
+            )
+            ok[i] = count_ok and roundtrip_valid(grid, self.mdp)
         return ok
 
 
-class OvercookedStructuralChecker(TransitionChecker):
-    """Approximate dynamics consistency on encoded states (documented).
+class OvercookedSimulatorChecker(TransitionChecker):
+    """Exact transition validation through the native simulator.
 
-    Checks per-player movement of at most one cell, static channels staying
-    fixed, and a monotone delivery counter increasing by at most one per
-    step. An exact simulator-decode check is queued as follow-up work.
+    Both states are decoded back to OvercookedState; the transition is
+    realizable iff some joint action maps the first to the second under
+    ``mdp.get_state_transition`` (urgency layer excluded) AND the augmented
+    delivery feature changes exactly when that action delivers.
     """
 
-    def __init__(self, validator: OvercookedLosslessValidator):
-        self.validator = validator
+    method = "simulator search over all joint actions on decoded states"
 
-    def _positions(self, state: np.ndarray) -> list[tuple[int, int]]:
-        grid = state[: self.validator.grid_size].reshape(*self.validator.grid_shape)
-        positions = []
-        for channel in (0, 1):
-            idx = np.unravel_index(np.argmax(grid[..., channel]), grid[..., channel].shape)
-            positions.append((int(idx[0]), int(idx[1])))
-        return positions
+    def __init__(self, mdp, grid_shape):
+        import itertools
+
+        from overcooked_ai_py.mdp.actions import Action
+
+        self.mdp = mdp
+        self.grid_shape = tuple(grid_shape)
+        self.grid_size = int(np.prod(grid_shape))
+        self.joint_actions = list(itertools.product(Action.ALL_ACTIONS, repeat=2))
+        self._decode_cache: dict[bytes, object] = {}
+
+    def _decode(self, flat: np.ndarray):
+        from reap.envs.overcooked_decode import decode_lossless
+
+        grid = np.asarray(flat[: self.grid_size], dtype=np.float64)
+        key = grid.tobytes()
+        if key not in self._decode_cache:
+            if np.all(grid == np.round(grid)):
+                self._decode_cache[key] = decode_lossless(
+                    grid.astype(int).reshape(*self.grid_shape), self.mdp
+                )
+            else:
+                self._decode_cache[key] = None
+        return self._decode_cache[key]
 
     def realizable(self, state: np.ndarray, next_state: np.ndarray) -> bool:
+        from reap.envs.overcooked_decode import COMPARE_LAYERS, encode_state
+
         state = np.asarray(state, dtype=np.float64)
         next_state = np.asarray(next_state, dtype=np.float64)
-        mask = self.validator.static_mask
-        if not np.allclose(state[mask], next_state[mask]):
+        native = self._decode(state)
+        if native is None or self._decode(next_state) is None:
             return False
+        target = (
+            next_state[: self.grid_size]
+            .reshape(*self.grid_shape)
+            .astype(int)[..., COMPARE_LAYERS]
+        )
         delta_count = next_state[-1] - state[-1]
-        if not -1e-6 <= delta_count <= DELIVERY_SCALE + 1e-6:
-            return False
-        for (r0, c0), (r1, c1) in zip(self._positions(state), self._positions(next_state)):
-            if abs(r0 - r1) + abs(c0 - c1) > 1:
-                return False
-        return True
+        for joint_action in self.joint_actions:
+            successor, infos = self.mdp.get_state_transition(native, joint_action)
+            sparse = sum(infos["sparse_reward_by_agent"])
+            expected_delta = DELIVERY_SCALE * (sparse / 20.0) if sparse > 0 else 0.0
+            if abs(delta_count - expected_delta) > 1e-6:
+                continue
+            if np.array_equal(encode_state(successor, self.mdp)[..., COMPARE_LAYERS], target):
+                return True
+        return False
 
 
 def load_policy_nets(run_dir: str | Path, env: CoopEnv, hidden: int = 128) -> MappoNets:
@@ -307,12 +337,29 @@ def run_pipeline(
         out_dir / "teacher.pt",
     )
 
-    validator = OvercookedLosslessValidator(
+    validator = OvercookedExactValidator(
         np.concatenate(train_buffer.episodes, axis=0),
         grid_shape=base.lossless_shape,
+        mdp=base._mdp,
     )
-    checker = OvercookedStructuralChecker(validator)
+    checker = OvercookedSimulatorChecker(base._mdp, base.lossless_shape)
     goal_states = extract_goal_states(train_buffer)
+
+    provenance = {
+        "layout": layout,
+        "native_layout_name": base.native_layout_name,
+        "horizon": horizon,
+        "seed": seed,
+        "window": window,
+        "teacher_steps": teacher_steps,
+        "delivery_feature_scale": DELIVERY_SCALE,
+        "validator_method": OvercookedExactValidator.method,
+        "checker_method": OvercookedSimulatorChecker.method,
+        "checker_scope": "bridge windows (quality report) and feasibility filtering",
+        "ladder_checkpoints": {"mappo_vanilla": str(vanilla_run), "mappo_rnd": str(rnd_run)},
+        "episodes_train": len(train_episodes),
+        "episodes_holdout": len(holdout_episodes),
+    }
 
     # anchors for measurement: training-side for quality, holdout for calibration
     train_anchors, _ = anchor_outcomes(train_episodes, window, 2, rng)
@@ -350,7 +397,16 @@ def run_pipeline(
         validator=validator,
         success_fn=window_success,
         bridge_consistency_rate=float(consistency),
-        report_path=reports_dir / "teacher_quality_cramped.json",
+    )
+    quality_report["provenance"] = {
+        **provenance,
+        "teacher_loss_first20": float(np.mean(history[:20])),
+        "teacher_loss_last20": float(np.mean(history[-20:])),
+        "forward_sample_windows": int(len(forward_windows)),
+        "bridge_sample_windows": int(len(projected_bridges)),
+    }
+    (reports_dir / "teacher_quality_cramped.json").write_text(
+        json.dumps(quality_report, indent=2, sort_keys=True)
     )
 
     # direct-query propensity on holdout anchors + held-out calibration check
@@ -372,6 +428,7 @@ def run_pipeline(
         "holdout_anchors": int(len(holdout_anchors)),
         "holdout_disjointness": "episode-level split; holdout episodes never enter "
                                 "teacher training windows (ensure_disjoint on episode ids)",
+        "provenance": provenance,
     }
     (reports_dir / "calibration_cramped.json").write_text(
         json.dumps(cal_report, indent=2, sort_keys=True)
@@ -387,6 +444,32 @@ def run_pipeline(
         diffusion, model, dataset, train_anchors,
         policy_embedding=emb_rnd, success_fn=window_success, validator=validator,
         samples_per_state=samples_per_state, guidance_scale=2.0, generator=generator,
+    )
+
+    # direct-query potential table (the Section-5.5 shortcut, artifact-recorded)
+    from reap.signals import ReapPotential
+
+    tau_gate = 0.5
+    potential = ReapPotential(tau_gate=tau_gate)
+    potential.update_tables(train_anchors, train_prop, feasibility)
+    phi_values = np.array(
+        [potential.value(s, horizon) for s in train_anchors], dtype=np.float64
+    )
+    gated_out = int(np.sum(feasibility < tau_gate))
+    potential_report = {
+        "tau_gate": tau_gate,
+        "coverage_states": potential.coverage,
+        "propensity_range": [float(train_prop.min()), float(train_prop.max())],
+        "feasibility_range": [float(feasibility.min()), float(feasibility.max())],
+        "states_gated_out": gated_out,
+        "states_passing_gate": int(len(train_anchors) - gated_out),
+        "phi_range": [float(phi_values.min()), float(phi_values.max())],
+        "phi_bounded_in_unit_interval": bool(np.all((phi_values >= 0) & (phi_values <= 1))),
+        "feasibility_use": "gate only — never a reward magnitude (unit-test enforced)",
+        "provenance": provenance,
+    }
+    (reports_dir / "potential_table_cramped.json").write_text(
+        json.dumps(potential_report, indent=2, sort_keys=True)
     )
 
     split = len(train_anchors) * 3 // 4
@@ -405,7 +488,17 @@ def run_pipeline(
     torch.save({"p_hat": p_hat.state_dict(), "f_hat": f_hat.state_dict()},
                out_dir / "predictors.pt")
 
+    # stamp provenance into the warmup artifact as well
+    warmup_path = reports_dir / "warmup_buffer_cramped.json"
+    warmup_artifact = json.loads(warmup_path.read_text())
+    warmup_artifact["provenance"] = provenance
+    warmup_path.write_text(json.dumps(warmup_artifact, indent=2, sort_keys=True))
+
     summary = {
+        "provenance": provenance,
+        "potential_table": {k: potential_report[k] for k in
+                            ("tau_gate", "coverage_states", "states_gated_out",
+                             "phi_bounded_in_unit_interval")},
         "warmup": {k: warmup_report[k] for k in ("episodes", "success_count", "total_env_steps")},
         "warmup_gate_met": warmup_report["gate"]["met"],
         "teacher_loss_first20": float(np.mean(history[:20])),
