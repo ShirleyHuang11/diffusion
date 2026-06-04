@@ -1,5 +1,5 @@
 {
-  "coverage_states": 48,
+  "coverage_states": 220,
   "feasibility_range": [
     0.0,
     0.0
@@ -12,14 +12,20 @@
   ],
   "propensity_range": [
     0.0,
-    0.75
+    0.6875
   ],
   "provenance": {
     "checker_method": "simulator search over all joint actions on decoded states",
     "checker_scope": "bridge windows (quality report) and feasibility filtering",
+    "d_model": 256,
     "delivery_feature_scale": 0.1,
+    "device": "cuda",
+    "distill_epochs": 600,
+    "distill_hidden": 256,
     "episodes_holdout": 35,
     "episodes_train": 140,
+    "feasibility_samples": 8,
+    "gpu_name": "NVIDIA A100-PCIE-40GB MIG 1g.5gb",
     "horizon": 400,
     "ladder_checkpoints": {
       "mappo_rnd": "runs/probe_mappo_rnd_cramped/seed0",
@@ -27,12 +33,15 @@
     },
     "layout": "cramped_room",
     "native_layout_name": "cramped_room",
+    "nhead": 8,
+    "num_layers": 6,
+    "samples_per_state": 64,
     "seed": 0,
-    "teacher_steps": 40000,
+    "teacher_steps": 120000,
     "validator_method": "simulator-decode roundtrip (decode_lossless -> re-encode identity)",
     "window": 32
   },
-  "states_gated_out": 48,
+  "states_gated_out": 220,
   "states_passing_gate": 0,
   "tau_gate": 0.5
 }

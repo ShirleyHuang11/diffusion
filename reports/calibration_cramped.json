@@ -5,17 +5,17 @@
   "beta_before": 1.0,
   "bins": [
     {
-      "count": 3,
+      "count": 4,
       "hi": 0.1,
       "lo": 0.0,
-      "predicted_mean": 0.0625,
-      "realized_mean": 0.3333333333333333
+      "predicted_mean": 0.05078125,
+      "realized_mean": 1.0
     },
     {
-      "count": 4,
+      "count": 2,
       "hi": 0.2,
       "lo": 0.1,
-      "predicted_mean": 0.15625,
+      "predicted_mean": 0.1484375,
       "realized_mean": 0.5
     },
     {
@@ -23,42 +23,42 @@
       "hi": 0.30000000000000004,
       "lo": 0.2,
       "predicted_mean": 0.25,
-      "realized_mean": 0.0
+      "realized_mean": 1.0
     },
     {
-      "count": 5,
+      "count": 1,
       "hi": 0.4,
       "lo": 0.30000000000000004,
-      "predicted_mean": 0.3375,
+      "predicted_mean": 0.375,
       "realized_mean": 0.0
     },
     {
-      "count": 3,
+      "count": 16,
       "hi": 0.5,
       "lo": 0.4,
-      "predicted_mean": 0.4375,
-      "realized_mean": 0.0
+      "predicted_mean": 0.4541015625,
+      "realized_mean": 0.0625
     },
     {
-      "count": 17,
+      "count": 20,
       "hi": 0.6000000000000001,
       "lo": 0.5,
-      "predicted_mean": 0.5367647058823529,
-      "realized_mean": 0.0
-    },
-    {
-      "count": 11,
-      "hi": 0.7000000000000001,
-      "lo": 0.6000000000000001,
-      "predicted_mean": 0.6420454545454546,
+      "predicted_mean": 0.534375,
       "realized_mean": 0.0
     },
     {
       "count": 4,
+      "hi": 0.7000000000000001,
+      "lo": 0.6000000000000001,
+      "predicted_mean": 0.6328125,
+      "realized_mean": 0.0
+    },
+    {
+      "count": 0,
       "hi": 0.8,
       "lo": 0.7000000000000001,
-      "predicted_mean": 0.75,
-      "realized_mean": 0.0
+      "predicted_mean": null,
+      "realized_mean": null
     },
     {
       "count": 0,
@@ -75,18 +75,24 @@
       "realized_mean": null
     }
   ],
-  "brier": 0.318359375,
+  "brier": 0.3294830322265625,
   "ece_gate": 0.15,
   "holdout_anchors": 48,
   "holdout_disjointness": "episode-level split; holdout episodes never enter teacher training windows (ensure_disjoint on episode ids)",
-  "post_isotonic_ece": 0.13043478260869565,
+  "post_isotonic_ece": 0.20833333333333334,
   "post_isotonic_resolution": 0.0,
   "provenance": {
     "checker_method": "simulator search over all joint actions on decoded states",
     "checker_scope": "bridge windows (quality report) and feasibility filtering",
+    "d_model": 256,
     "delivery_feature_scale": 0.1,
+    "device": "cuda",
+    "distill_epochs": 600,
+    "distill_hidden": 256,
     "episodes_holdout": 35,
     "episodes_train": 140,
+    "feasibility_samples": 8,
+    "gpu_name": "NVIDIA A100-PCIE-40GB MIG 1g.5gb",
     "horizon": 400,
     "ladder_checkpoints": {
       "mappo_rnd": "runs/probe_mappo_rnd_cramped/seed0",
@@ -94,10 +100,13 @@
     },
     "layout": "cramped_room",
     "native_layout_name": "cramped_room",
+    "nhead": 8,
+    "num_layers": 6,
+    "samples_per_state": 64,
     "seed": 0,
-    "teacher_steps": 40000,
+    "teacher_steps": 120000,
     "validator_method": "simulator-decode roundtrip (decode_lossless -> re-encode identity)",
     "window": 32
   },
-  "raw_ece": 0.5130208333333333
+  "raw_ece": 0.5231119791666667
 }
