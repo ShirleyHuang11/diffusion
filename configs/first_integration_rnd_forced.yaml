@@ -1,0 +1,32 @@
+# First integration experiment — MAPPO+RND arm on sparse Forced Coordination.
+# Protocol: seeds {0,1,2} via --seed; fixed budget 5,000,000 env steps.
+# The vanilla MAPPO arm reuses the protocol-exact hardness_mappo_forced runs.
+run:
+  name: first_integration_rnd_forced
+  seed: 0
+  mode: paper
+  out_dir: runs
+  max_wall_clock_minutes: 2160
+  device: cpu
+
+env:
+  id: overcooked
+  layout: forced_coordination
+  horizon: 400
+  encoding: lossless
+
+algo:
+  name: mappo
+  total_env_steps: 5000000
+  params:
+    rollout_length: 1024
+    hidden_size: 128
+    entropy_coef: 0.02
+    intrinsic: rnd
+    intrinsic_coef: 1.0
+
+logging:
+  interval_env_steps: 25000
+
+checkpoint:
+  interval_env_steps: 250000

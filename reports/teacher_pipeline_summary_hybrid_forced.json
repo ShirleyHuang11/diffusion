@@ -1,0 +1,17 @@
+{
+  "halted": true,
+  "provenance": {
+    "halt_reason": "warmup ladder collected 0 successful episodes (< required 25) within 120000 env steps; teacher training must not proceed on this scope",
+    "horizon": 400,
+    "ladder_checkpoints": {
+      "mappo_rnd": "None",
+      "mappo_vanilla": "runs/hardness_mappo_forced/seed0"
+    },
+    "layout": "forced_coordination",
+    "scope": "hybrid features-encoding teacher (forced_coordination)",
+    "seed": 0
+  },
+  "runtime_seconds": 124.8,
+  "success_count": 0,
+  "warmup_gate_met": false
+}

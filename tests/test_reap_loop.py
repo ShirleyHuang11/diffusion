@@ -191,24 +191,56 @@ def _reap_cfg(tmp_path, name, total_steps, log_every=64, ckpt_every=128,
 
 
 def _skip_without_artifacts():
+    # disabled-scope runner tests need only the committed quality artifact
+    pytest.importorskip("overcooked_ai_py")
+
+
+def _enabled_quality(tmp_path):
+    import json
+
+    path = tmp_path / "quality_pass.json"
+    path.write_text(json.dumps({"shaping_enabled": True, "gate_violations": []}))
+    return str(path)
+
+
+def _skip_without_hybrid_artifacts():
     from pathlib import Path
 
     pytest.importorskip("overcooked_ai_py")
-    if not Path("runs/teacher_cramped/predictors.pt").is_file():
-        pytest.skip("teacher predictors not present in this checkout")
-    if not Path("runs/teacher_cramped/calibration_holdout.npz").is_file():
-        pytest.skip("calibration payload not present in this checkout")
+    for needed in ("runs/teacher_hybrid_cramped/predictors.pt",
+                   "runs/teacher_hybrid_cramped/calibration_holdout.npz",
+                   "runs/teacher_hybrid_cramped/probe_observations.npy",
+                   "runs/teacher_hybrid_cramped/teacher.pt"):
+        if not Path(needed).is_file():
+            pytest.skip(f"{needed} not present in this checkout")
+
+
+def _hybrid_params(tmp_path, refresh_mode="fixed_predictors"):
+    return {
+        "quality_report": _enabled_quality(tmp_path),
+        "predictors": "runs/teacher_hybrid_cramped/predictors.pt",
+        "calibration_payload": "runs/teacher_hybrid_cramped/calibration_holdout.npz",
+        "probe_observations": "runs/teacher_hybrid_cramped/probe_observations.npy",
+        "teacher": "runs/teacher_hybrid_cramped/teacher.pt",
+        "refresh_mode": refresh_mode,
+    }
 
 
 @pytest.mark.overcooked
 def test_reap_mappo_refreshes_are_real_and_calibrated(tmp_path):
-    """Every scheduled refresh refreshes real states AND carries calibration."""
+    """Enabled scope: every scheduled refresh refreshes real states AND
+    carries calibration computed AFTER the refresh."""
+    import dataclasses
     import json
 
-    _skip_without_artifacts()
+    _skip_without_hybrid_artifacts()
     from reap.train import run_from_config
 
     cfg = _reap_cfg(tmp_path, "reapcal", total_steps=192, refresh_every=1)
+    cfg = dataclasses.replace(
+        cfg, algo=dataclasses.replace(
+            cfg.algo, params={**cfg.algo.params, **_hybrid_params(tmp_path)})
+    )
     run_from_config(cfg)
     events = [json.loads(line) for line in
               (tmp_path / "runs" / "reapcal" / "seed0" / "shaping_events.jsonl")
@@ -220,6 +252,43 @@ def test_reap_mappo_refreshes_are_real_and_calibrated(tmp_path):
         assert "note" not in event  # never "no refresher configured"
         cal = event["calibration"]
         assert {"raw_ece", "brier", "action", "beta_after", "alert"} <= set(cal)
+
+
+def test_post_refresh_calibration_reflects_refit_predictor():
+    """Codex round-10 gap 1: when the refresher changes p-hat, the
+    calibration event must describe the POST-refresh predictions."""
+    from reap.signals.distill import DistilledPredictor
+
+    rng = np.random.default_rng(0)
+    anchors = rng.normal(size=(60, 4)).astype(np.float32)
+    cal_anchors = rng.normal(size=(40, 4)).astype(np.float32)
+    realized = np.zeros(40)  # nothing ever succeeds
+
+    p_hat = DistilledPredictor(4, hidden=32, seed=0)
+    p_hat.fit(anchors, np.full(60, 0.95, dtype=np.float32), epochs=120)  # overconfident
+    pre_refresh_pred = np.clip(p_hat.predict(cal_anchors), 0, 1)
+    assert pre_refresh_pred.mean() > 0.7  # stale predictor is overconfident
+
+    potential = table_potential()
+
+    def refresher():
+        # the refresh refits p_hat toward honesty (low propensity)
+        p_hat.fit(anchors, np.full(60, 0.02, dtype=np.float32), epochs=120)
+        return anchors, np.full(60, 0.02), np.ones(60)
+
+    controller = ReapShapingController(
+        potential=potential, ladder=CalibrationLadder(beta=1.0),
+        quality_report=PASSING_QUALITY, refresh_every_updates=1,
+        refresher=refresher,
+    )
+    event = controller.maybe_refresh(
+        1, calibration_fn=lambda: (np.clip(p_hat.predict(cal_anchors), 0, 1), realized)
+    )
+    # post-refresh predictions are near zero -> nearly calibrated vs zeros;
+    # had the stale predictor been used, ECE would be ~0.7+
+    assert event["calibration"]["raw_ece"] < 0.2
+    post = np.clip(p_hat.predict(cal_anchors), 0, 1)
+    assert post.mean() < 0.2
 
 
 @pytest.mark.overcooked
@@ -260,14 +329,13 @@ def test_reap_mappo_resume_no_duplicate_gate_event(tmp_path):
 
 
 @pytest.mark.overcooked
-def test_reap_mappo_refuses_missing_calibration_payload(tmp_path):
+def test_reap_mappo_refuses_missing_calibration_payload_when_enabled(tmp_path):
     pytest.importorskip("overcooked_ai_py")
+    import dataclasses
     from pathlib import Path
 
-    if not Path("runs/teacher_cramped/predictors.pt").is_file():
+    if not Path("runs/teacher_hybrid_cramped/predictors.pt").is_file():
         pytest.skip("teacher predictors not present in this checkout")
-    import dataclasses
-
     from reap.config import ConfigError
     from reap.train import run_from_config
 
@@ -276,11 +344,95 @@ def test_reap_mappo_refuses_missing_calibration_payload(tmp_path):
         cfg,
         algo=dataclasses.replace(
             cfg.algo,
-            params={**cfg.algo.params, "calibration_payload": str(tmp_path / "absent.npz")},
+            params={**cfg.algo.params,
+                    "quality_report": _enabled_quality(tmp_path),
+                    "predictors": "runs/teacher_hybrid_cramped/predictors.pt",
+                    "calibration_payload": str(tmp_path / "absent.npz")},
         ),
     )
     with pytest.raises(ConfigError, match="calibration payload"):
         run_from_config(cfg)
+
+
+@pytest.mark.overcooked
+def test_reap_mappo_policy_conditioned_runner_and_resume(tmp_path, monkeypatch):
+    """Runner-boundary policy_conditioned test with a stub sampler: refreshes
+    track the live policy, calibration is post-refit, predictor state rides
+    in checkpoints and restores on resume."""
+    import dataclasses
+    import json
+
+    _skip_without_hybrid_artifacts()
+    import reap.hybrid_teacher as hybrid
+
+    calls = {"n": 0}
+
+    def stub_factory(teacher_path, samples_per_state=8, device="auto", seed=0):
+        payload = np.load("runs/teacher_hybrid_cramped/calibration_holdout.npz",
+                          allow_pickle=True)
+        fdim = payload["refresh_anchors_features"].shape[1]
+        window = 4
+
+        def sampler(embedding_vec, feature_anchors):
+            calls["n"] += 1
+            m = 4
+            windows = np.zeros((len(feature_anchors), m, window, fdim), dtype=np.float32)
+            windows[:, :2, -1, -1] = 0.1  # half the samples deliver
+            return windows
+
+        return sampler
+
+    monkeypatch.setattr(hybrid, "make_teacher_sampler", stub_factory)
+
+    cfg = _reap_cfg(tmp_path, "reappc", total_steps=128, ckpt_every=128,
+                    refresh_every=1)
+    cfg = dataclasses.replace(
+        cfg, algo=dataclasses.replace(
+            cfg.algo,
+            params={**cfg.algo.params,
+                    **_hybrid_params(tmp_path, refresh_mode="policy_conditioned")})
+    )
+    from reap.train import run_from_config
+
+    summary = run_from_config(cfg)
+    assert summary["shaping_enabled"] is True
+    assert calls["n"] >= 1  # the teacher stub was queried with live embeddings
+
+    run_dir = tmp_path / "runs" / "reappc" / "seed0"
+    events = [json.loads(line) for line in
+              (run_dir / "shaping_events.jsonl").read_text().splitlines()]
+    refreshes = [e for e in events if e["type"] == "refresh"]
+    assert refreshes and all("calibration" in e for e in refreshes)
+
+    # predictor weights mutated by the refit must ride in the checkpoint:
+    # resume and verify the controller restores them (predictions match)
+    from reap.checkpoint import latest_checkpoint, load_checkpoint
+
+    payload = load_checkpoint(latest_checkpoint(run_dir / "checkpoints"))
+    assert "p_hat" in payload["controller"]["potential"]
+
+    from reap.signals.distill import DistilledPredictor
+
+    saved = payload["controller"]["potential"]["p_hat"]
+    probe = np.load("runs/teacher_hybrid_cramped/calibration_holdout.npz",
+                    allow_pickle=True)["calibration_anchors"].astype(np.float32)[:8]
+    restored = DistilledPredictor(saved["state_dim"], hidden=saved["net"]["0.weight"].shape[0])
+    restored.load_state_dict(saved)
+    expected = restored.predict(probe)
+
+    # resume with refreshes effectively off: the resumed segment must carry
+    # the REFIT weights forward unchanged (restored from the checkpoint, not
+    # rebuilt from the original artifact)
+    cfg_more = dataclasses.replace(
+        cfg, algo=dataclasses.replace(
+            cfg.algo, total_env_steps=192,
+            params={**cfg.algo.params, "refresh_every_k_updates": 10_000}))
+    run_from_config(cfg_more, resume=True)
+    payload2 = load_checkpoint(latest_checkpoint(run_dir / "checkpoints"))
+    saved2 = payload2["controller"]["potential"]["p_hat"]
+    restored2 = DistilledPredictor(saved2["state_dim"], hidden=saved2["net"]["0.weight"].shape[0])
+    restored2.load_state_dict(saved2)
+    assert np.allclose(restored2.predict(probe), expected, atol=1e-6)
 
 
 @pytest.mark.overcooked
@@ -328,7 +480,8 @@ def test_reap_mappo_runner_disabled_path_smoke(tmp_path):
     events = [json.loads(line) for line in
               (run_dir / "shaping_events.jsonl").read_text().splitlines()]
     assert events[0]["type"] == "gate" and events[0]["enabled"] is False
-    assert any(e["type"] == "refresh" for e in events)
+    # gate-disabled scopes never refresh: the audit trail is the gate event
+    assert not any(e["type"] == "refresh" for e in events)
 
     from reap.checkpoint import latest_checkpoint, load_checkpoint
 

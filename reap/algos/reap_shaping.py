@@ -47,6 +47,27 @@ class PredictorPotential:
         self.f_hat.load_state_dict(state["f_hat"])
         self.tau_gate = state["tau_gate"]
 
+    def update_tables(self, states, propensity, feasibility) -> None:
+        # predictor-backed potentials are refreshed by refitting p_hat/f_hat
+        # (done by the refresher itself); record the refresh size only
+        self.last_refresh_states = int(len(states))
+
+
+class ZeroPotential:
+    """Null potential for scopes whose quality gate disables shaping."""
+
+    def value(self, state, steps_remaining) -> float:
+        return 0.0
+
+    def update_tables(self, states, propensity, feasibility) -> None:
+        pass
+
+    def state_dict(self) -> dict:
+        return {}
+
+    def load_state_dict(self, state: dict) -> None:
+        pass
+
 
 class PotentialSnapshot:
     """Immutable view of the potential + beta for exactly one rollout batch."""
@@ -124,8 +145,14 @@ class ReapShapingController:
         update_index: int,
         calibration_predicted: np.ndarray | None = None,
         calibration_realized: np.ndarray | None = None,
+        calibration_fn=None,
     ) -> dict | None:
-        """Refresh the propensity tables every K updates (between batches only)."""
+        """Refresh the propensity tables every K updates (between batches only).
+
+        ``calibration_fn() -> (predicted, realized)`` is evaluated AFTER the
+        refresher runs, so calibration always governs the refreshed signal
+        that will shape the next batch (not the stale pre-refresh one).
+        """
         if update_index == 0 or update_index % self.refresh_every != 0:
             return None
         if self._pinned:
@@ -145,6 +172,8 @@ class ReapShapingController:
         else:
             event["refreshed_states"] = 0
             event["note"] = "no refresher configured"
+        if calibration_fn is not None:
+            calibration_predicted, calibration_realized = calibration_fn()
         if calibration_predicted is not None and calibration_realized is not None:
             cal = self.ladder.check(calibration_predicted, calibration_realized)
             event["calibration"] = {

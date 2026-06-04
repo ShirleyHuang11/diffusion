@@ -285,7 +285,7 @@ def run_hybrid_pipeline(
     horizon: int = 400,
     vanilla_run: str = "runs/gate_mappo_cramped/seed0",
     rnd_run: str = "runs/probe_mappo_rnd_cramped/seed0",
-    out_dir="runs/teacher_hybrid_cramped",
+    out_dir=None,
     reports_dir="reports",
     min_successes: int = 25,
     max_warmup_steps: int = 120_000,
@@ -319,6 +319,9 @@ def run_hybrid_pipeline(
     from reap.teacher_pipeline import load_policy_nets, nets_policy
 
     start = _time.monotonic()
+    tag = layout.split("_")[0]  # cramped_room -> "cramped", forced_coordination -> "forced"
+    if out_dir is None:
+        out_dir = f"runs/teacher_hybrid_{tag}"
     out_dir, reports_dir = Path(out_dir), Path(reports_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(seed)
@@ -336,15 +339,57 @@ def run_hybrid_pipeline(
         num_actions = paired.num_actions
 
     vanilla_nets = load_policy_nets(vanilla_run, _NetsEnv)
-    rnd_nets = load_policy_nets(rnd_run, _NetsEnv)
+    ladder = [("mappo_vanilla", nets_policy(vanilla_nets))]
+    rnd_nets = None
+    if rnd_run is not None:
+        rnd_nets = load_policy_nets(rnd_run, _NetsEnv)
+        ladder.append(("mappo_rnd", nets_policy(rnd_nets)))
     lossless_buf, feature_buf, warmup_report = collect_paired_warmup(
         paired,
-        ladder=[("mappo_vanilla", nets_policy(vanilla_nets)),
-                ("mappo_rnd", nets_policy(rnd_nets))],
+        ladder=ladder,
         min_successes=min_successes,
         max_env_steps=max_warmup_steps,
     )
     lossless_buf.save(out_dir / "warmup_lossless.npz")
+    if not warmup_report["gate"]["met"]:
+        # scope-specific halt: no successful warmup episodes means no teacher
+        # for this scope; write the diagnostic and a quality-DISABLED signal
+        # artifact so downstream REAP runs are gated off honestly
+        halt_provenance = {
+            "scope": f"hybrid features-encoding teacher ({layout})",
+            "layout": layout, "horizon": horizon, "seed": seed,
+            "ladder_checkpoints": {"mappo_vanilla": str(vanilla_run),
+                                   "mappo_rnd": str(rnd_run)},
+            "halt_reason": (
+                f"warmup ladder collected {lossless_buf.success_count} successful "
+                f"episodes (< required {min_successes}) within "
+                f"{warmup_report['total_env_steps']} env steps; teacher training "
+                "must not proceed on this scope"
+            ),
+        }
+        warmup_report["provenance"] = halt_provenance
+        (reports_dir / f"warmup_buffer_hybrid_{tag}.json").write_text(
+            json.dumps(warmup_report, indent=2, sort_keys=True)
+        )
+        quality_disabled = {
+            "shaping_enabled": False,
+            "gate_violations": [halt_provenance["halt_reason"]],
+            "provenance": halt_provenance,
+        }
+        (reports_dir / f"teacher_quality_hybrid_{tag}.json").write_text(
+            json.dumps(quality_disabled, indent=2, sort_keys=True)
+        )
+        summary = {
+            "runtime_seconds": round(_time.monotonic() - start, 1),
+            "halted": True,
+            "warmup_gate_met": False,
+            "success_count": lossless_buf.success_count,
+            "provenance": halt_provenance,
+        }
+        (reports_dir / f"teacher_pipeline_summary_hybrid_{tag}.json").write_text(
+            json.dumps(summary, indent=2, sort_keys=True)
+        )
+        return summary
     feature_buf.save(out_dir / "warmup_features.npz")
 
     # episode split (same convention as the lossless pipeline)
@@ -365,10 +410,10 @@ def run_hybrid_pipeline(
     dataset = TrajectoryWindowDataset(feat_train, window=window, stride=4)
 
     probes = collect_probe_observations(
-        _ProbeAdapter(paired), nets_policy(rnd_nets), n_probes=16, rng=rng
+        _ProbeAdapter(paired), nets_policy(rnd_nets or vanilla_nets), n_probes=16, rng=rng
     )
     embedding = BehavioralPolicyEmbedding(probes)
-    emb_rnd = embedding.embed(rnd_nets)
+    emb_rnd = embedding.embed(rnd_nets or vanilla_nets)
     emb_vanilla = embedding.embed(vanilla_nets)
     cond_pool = torch.as_tensor(
         np.stack([emb_rnd, emb_vanilla]).astype(np.float32)
@@ -518,7 +563,7 @@ def run_hybrid_pipeline(
         "anchors_used": int(len(anchors_l)),
     }
     quality["provenance"] = provenance
-    (reports_dir / "teacher_quality_hybrid_cramped.json").write_text(
+    (reports_dir / f"teacher_quality_hybrid_{tag}.json").write_text(
         json.dumps(quality, indent=2, sort_keys=True)
     )
 
@@ -551,7 +596,7 @@ def run_hybrid_pipeline(
         "holdout_disjointness": "episode-level split; holdout episodes never enter teacher training windows",
         "provenance": provenance,
     }
-    (reports_dir / "calibration_hybrid_cramped.json").write_text(
+    (reports_dir / f"calibration_hybrid_{tag}.json").write_text(
         json.dumps(cal_report, indent=2, sort_keys=True)
     )
 
@@ -572,7 +617,7 @@ def run_hybrid_pipeline(
         "feasibility_use": "gate only — never a reward magnitude",
         "provenance": provenance,
     }
-    (reports_dir / "potential_table_hybrid_cramped.json").write_text(
+    (reports_dir / f"potential_table_hybrid_{tag}.json").write_text(
         json.dumps(potential_report, indent=2, sort_keys=True)
     )
 
@@ -585,13 +630,13 @@ def run_hybrid_pipeline(
     p_hat.fit(anchors_l[~mask], propensity[~mask].astype(np.float32), epochs=distill_epochs)
     p_rep = distillation_fidelity_report(
         p_hat, anchors_l[mask], propensity[mask],
-        report_path=reports_dir / "distill_fidelity_hybrid_cramped.json",
+        report_path=reports_dir / f"distill_fidelity_hybrid_{tag}.json",
         provenance=distill_prov)
     f_hat = DistilledPredictor(paired.lossless_dim, hidden=distill_hidden, seed=seed + 1)
     f_hat.fit(anchors_l[~mask], feasibility[~mask].astype(np.float32), epochs=distill_epochs)
     f_rep = distillation_fidelity_report(
         f_hat, anchors_l[mask], feasibility[mask],
-        report_path=reports_dir / "distill_fidelity_feasibility_hybrid_cramped.json",
+        report_path=reports_dir / f"distill_fidelity_feasibility_hybrid_{tag}.json",
         provenance=distill_prov)
     torch.save({"p_hat": p_hat.state_dict(), "f_hat": f_hat.state_dict()},
                out_dir / "predictors.pt")
@@ -607,13 +652,13 @@ def run_hybrid_pipeline(
     np.save(out_dir / "probe_observations.npy", probes)
 
     warmup_report["provenance"] = provenance
-    (reports_dir / "warmup_buffer_hybrid_cramped.json").write_text(
+    (reports_dir / f"warmup_buffer_hybrid_{tag}.json").write_text(
         json.dumps(warmup_report, indent=2, sort_keys=True)
     )
-    for name in ("warmup_buffer_hybrid_cramped.json", "teacher_quality_hybrid_cramped.json",
-                 "calibration_hybrid_cramped.json", "potential_table_hybrid_cramped.json",
-                 "distill_fidelity_hybrid_cramped.json",
-                 "distill_fidelity_feasibility_hybrid_cramped.json"):
+    for name in (f"warmup_buffer_hybrid_{tag}.json", f"teacher_quality_hybrid_{tag}.json",
+                 f"calibration_hybrid_{tag}.json", f"potential_table_hybrid_{tag}.json",
+                 f"distill_fidelity_hybrid_{tag}.json",
+                 f"distill_fidelity_feasibility_hybrid_{tag}.json"):
         if "provenance" not in json.loads((reports_dir / name).read_text()):
             raise RuntimeError(f"pipeline artifact {name} lacks provenance")
 
@@ -631,7 +676,7 @@ def run_hybrid_pipeline(
         "distill_p_hat": {"mae": p_rep["mae"], "passed": p_rep["passed"]},
         "distill_f_hat": {"mae": f_rep["mae"], "passed": f_rep["passed"]},
     }
-    (reports_dir / "teacher_pipeline_summary_hybrid_cramped.json").write_text(
+    (reports_dir / f"teacher_pipeline_summary_hybrid_{tag}.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True)
     )
     return summary

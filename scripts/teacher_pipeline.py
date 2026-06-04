@@ -37,6 +37,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hybrid", action="store_true",
                         help="run the hybrid features-encoding pipeline")
     parser.add_argument("--window", type=int, default=None)
+    parser.add_argument("--layout", default="cramped_room")
+    parser.add_argument("--vanilla-run", default="runs/gate_mappo_cramped/seed0")
+    parser.add_argument("--rnd-run", default="runs/probe_mappo_rnd_cramped/seed0",
+                        help="pass 'none' to use a single-rung ladder")
     args = parser.parse_args(argv)
 
     seed_everything(args.seed)
@@ -44,6 +48,9 @@ def main(argv: list[str] | None = None) -> int:
         from reap.hybrid_teacher import run_hybrid_pipeline
 
         summary = run_hybrid_pipeline(
+            layout=args.layout,
+            vanilla_run=args.vanilla_run,
+            rnd_run=None if args.rnd_run.lower() == "none" else args.rnd_run,
             seed=args.seed,
             teacher_steps=args.teacher_steps,
             min_successes=args.min_successes,

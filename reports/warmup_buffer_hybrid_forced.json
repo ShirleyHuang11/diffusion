@@ -1,0 +1,40 @@
+{
+  "episode_length_mean": 400.0,
+  "episodes": 300,
+  "gate": {
+    "collection_truncated_at_cap": false,
+    "ladder": [
+      "mappo_vanilla"
+    ],
+    "max_env_steps": 120000,
+    "met": false,
+    "min_successes": 25
+  },
+  "per_source": {
+    "mappo_vanilla": {
+      "episodes": 300,
+      "successes": 0
+    }
+  },
+  "provenance": {
+    "halt_reason": "warmup ladder collected 0 successful episodes (< required 25) within 120000 env steps; teacher training must not proceed on this scope",
+    "horizon": 400,
+    "ladder_checkpoints": {
+      "mappo_rnd": "None",
+      "mappo_vanilla": "runs/hardness_mappo_forced/seed0"
+    },
+    "layout": "forced_coordination",
+    "scope": "hybrid features-encoding teacher (forced_coordination)",
+    "seed": 0
+  },
+  "return_mean": 0.0,
+  "state_coverage": {
+    "dim": 651,
+    "mean_abs": 0.04460791125893593,
+    "per_dim_std_mean": 0.03981345519423485,
+    "states_total": 120300
+  },
+  "success_count": 0,
+  "success_state_examples": [],
+  "total_env_steps": 120000
+}

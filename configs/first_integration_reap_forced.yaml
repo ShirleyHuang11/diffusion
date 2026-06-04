@@ -1,0 +1,37 @@
+# First integration experiment — REAP arm on sparse Forced Coordination.
+# Shaping is governed by the SCOPE-SPECIFIC teacher-quality artifact
+# (reports/teacher_quality_hybrid_forced.json). If the Forced Coordination
+# warmup ladder halted with zero successes, that artifact disables shaping
+# and this arm runs with the gate reason in its audit trail — reported
+# explicitly in the first-integration report.
+# Protocol: seeds {0,1,2} via --seed; fixed budget 5,000,000 env steps
+# (configured value, matching all existing protocol runs incl. the reused
+# vanilla arm; the plan's 10M is a configurable default).
+run:
+  name: first_integration_reap_forced
+  seed: 0
+  mode: paper
+  out_dir: runs
+  max_wall_clock_minutes: 2160
+  device: cpu
+
+env:
+  id: overcooked
+  layout: forced_coordination
+  horizon: 400
+  encoding: lossless
+
+algo:
+  name: reap_mappo
+  total_env_steps: 5000000
+  params:
+    rollout_length: 1024
+    hidden_size: 128
+    entropy_coef: 0.02
+    quality_report: reports/teacher_quality_hybrid_forced.json
+
+logging:
+  interval_env_steps: 25000
+
+checkpoint:
+  interval_env_steps: 250000

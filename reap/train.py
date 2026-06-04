@@ -234,8 +234,6 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
     from reap.calibration import CalibrationLadder
     from reap.signals.distill import DistilledPredictor
 
-    from reap.signals.potential import ReapPotential
-
     params = dict(cfg.algo.params)
     quality_path = params.pop("quality_report", "reports/teacher_quality_cramped.json")
     predictors_path = params.pop("predictors", "runs/teacher_cramped/predictors.pt")
@@ -251,66 +249,91 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
         "probe_observations", "runs/teacher_hybrid_cramped/probe_observations.npy"
     )
 
+    quality = json.loads(Path(quality_path).read_text())
+    shaping_enabled = bool(quality.get("shaping_enabled", False))
+
     env = make_env(cfg.env.id, **_env_kwargs(cfg))
+    if shaping_enabled and cfg.env.id == "overcooked":
+        # the teacher's anchors/predictors live in the delivery-augmented
+        # state; training must visit the same state space
+        from reap.teacher_pipeline import DeliveryAugmentedOvercooked
+
+        env = DeliveryAugmentedOvercooked(env)
     trainer = MappoTrainer(env, params, seed=cfg.run.seed)
 
-    quality = json.loads(Path(quality_path).read_text())
-    import torch as _torch
+    calibration_fn = None
+    refresher = None
+    if not shaping_enabled:
+        # gate-disabled scope: no teacher artifacts required; the run is the
+        # honest disabled-REAP arm with the gate reason in the audit trail
+        from reap.algos.reap_shaping import ZeroPotential
 
-    predictor_state = _torch.load(predictors_path, map_location="cpu", weights_only=False)
-    state_dim = len(predictor_state["p_hat"]["input_mean"])
-    p_hat = DistilledPredictor(state_dim, hidden=predictor_state["p_hat"]["net"]["0.weight"].shape[0])
-    p_hat.load_state_dict(predictor_state["p_hat"])
-    f_hat = DistilledPredictor(state_dim, hidden=predictor_state["f_hat"]["net"]["0.weight"].shape[0])
-    f_hat.load_state_dict(predictor_state["f_hat"])
-
-    # scheduled refreshes must be calibrated: refuse to run without the
-    # persisted, episode-disjoint calibration payload
-    if not Path(payload_path).is_file():
-        raise ConfigError(
-            f"calibration payload not found: {payload_path}; reap_mappo refuses "
-            "uncalibrated refreshes (build it via reap.teacher_pipeline."
-            "build_calibration_payload or rerun the teacher pipeline)"
-        )
-    payload_npz = np.load(payload_path, allow_pickle=True)
-    refresh_anchors = payload_npz["refresh_anchors"].astype(np.float32)
-    cal_anchors = payload_npz["calibration_anchors"].astype(np.float32)
-    cal_realized = payload_npz["calibration_realized"].astype(np.float64)
-
-    if refresh_mode == "policy_conditioned":
-        # enabled scope: re-query the frozen teacher with the CURRENT policy's
-        # behavioral embedding and refit the distilled predictors
-        from reap.hybrid_teacher import PolicyConditionedRefresher, make_teacher_sampler
-        from reap.signals import BehavioralPolicyEmbedding
-
-        if "refresh_anchors_features" not in payload_npz:
-            raise ConfigError(
-                "policy_conditioned refresh requires a hybrid calibration payload "
-                "with paired feature anchors"
-            )
-        refresher = PolicyConditionedRefresher(
-            nets_provider=lambda: trainer.nets,
-            embedding=BehavioralPolicyEmbedding(np.load(probes_path)),
-            sampler=make_teacher_sampler(teacher_path, seed=cfg.run.seed),
-            lossless_anchors=refresh_anchors,
-            feature_anchors=payload_npz["refresh_anchors_features"].astype(np.float32),
-            feasibility=np.clip(f_hat.predict(refresh_anchors), 0.0, 1.0),
-            p_hat=p_hat,
-            f_hat=f_hat,
-        )
-    elif refresh_mode == "fixed_predictors":
-        def refresher():
-            # disabled-quality scope: deterministic rebuild from the distilled
-            # predictors over the persisted refresh anchors
-            prop = np.clip(p_hat.predict(refresh_anchors), 0.0, 1.0)
-            feas = np.clip(f_hat.predict(refresh_anchors), 0.0, 1.0)
-            return refresh_anchors, prop, feas
+        potential = ZeroPotential()
+        p_hat = f_hat = None
     else:
-        raise ConfigError(f"unknown refresh_mode {refresh_mode!r}")
+        import torch as _torch
 
-    potential = ReapPotential(tau_gate=tau_gate)
-    states0, prop0, feas0 = refresher()
-    potential.update_tables(states0, prop0, feas0)
+        predictor_state = _torch.load(predictors_path, map_location="cpu", weights_only=False)
+        state_dim = len(predictor_state["p_hat"]["input_mean"])
+        p_hat = DistilledPredictor(state_dim, hidden=predictor_state["p_hat"]["net"]["0.weight"].shape[0])
+        p_hat.load_state_dict(predictor_state["p_hat"])
+        f_hat = DistilledPredictor(state_dim, hidden=predictor_state["f_hat"]["net"]["0.weight"].shape[0])
+        f_hat.load_state_dict(predictor_state["f_hat"])
+
+        # scheduled refreshes must be calibrated: refuse to run without the
+        # persisted, episode-disjoint calibration payload
+        if not Path(payload_path).is_file():
+            raise ConfigError(
+                f"calibration payload not found: {payload_path}; reap_mappo refuses "
+                "uncalibrated refreshes (build it via reap.teacher_pipeline."
+                "build_calibration_payload or rerun the teacher pipeline)"
+            )
+        payload_npz = np.load(payload_path, allow_pickle=True)
+        refresh_anchors = payload_npz["refresh_anchors"].astype(np.float32)
+        cal_anchors = payload_npz["calibration_anchors"].astype(np.float32)
+        cal_realized = payload_npz["calibration_realized"].astype(np.float64)
+
+        if refresh_mode == "policy_conditioned":
+            # enabled scope: re-query the frozen teacher with the CURRENT
+            # policy's behavioral embedding and refit the distilled predictors
+            from reap.hybrid_teacher import PolicyConditionedRefresher, make_teacher_sampler
+            from reap.signals import BehavioralPolicyEmbedding
+
+            if "refresh_anchors_features" not in payload_npz:
+                raise ConfigError(
+                    "policy_conditioned refresh requires a hybrid calibration "
+                    "payload with paired feature anchors"
+                )
+            refresher = PolicyConditionedRefresher(
+                nets_provider=lambda: trainer.nets,
+                embedding=BehavioralPolicyEmbedding(np.load(probes_path)),
+                sampler=make_teacher_sampler(teacher_path, seed=cfg.run.seed),
+                lossless_anchors=refresh_anchors,
+                feature_anchors=payload_npz["refresh_anchors_features"].astype(np.float32),
+                feasibility=np.clip(f_hat.predict(refresh_anchors), 0.0, 1.0),
+                p_hat=p_hat,
+                f_hat=f_hat,
+            )
+        elif refresh_mode == "fixed_predictors":
+            def refresher():
+                prop = np.clip(p_hat.predict(refresh_anchors), 0.0, 1.0)
+                feas = np.clip(f_hat.predict(refresh_anchors), 0.0, 1.0)
+                return refresh_anchors, prop, feas
+        else:
+            raise ConfigError(f"unknown refresh_mode {refresh_mode!r}")
+
+        # the predictor-backed potential generalizes shaping beyond anchor
+        # keys; its state_dict carries p_hat/f_hat so refit weights ride in
+        # every checkpoint and restore on resume
+        potential = PredictorPotential(p_hat, f_hat, tau_gate)
+
+        def calibration_fn():
+            # evaluated AFTER the refresher inside maybe_refresh, so the
+            # logged ECE/Brier always describe the just-refreshed predictor
+            return (
+                np.clip(p_hat.predict(cal_anchors), 0.0, 1.0),
+                cal_realized,
+            )
 
     controller = ReapShapingController(
         potential=potential,
@@ -330,6 +353,8 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
         payload = load_checkpoint(ckpt_path)
         trainer.load_state_dict(payload["trainer"])
         controller.load_state_dict(payload["controller"])
+        # the resumed run's configured cadence wins over the checkpointed one
+        controller.refresh_every = refresh_every
 
     events_path = out_dir / "shaping_events.jsonl"
 
@@ -404,12 +429,10 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
             raise WallClockExceeded(
                 f"run exceeded max_wall_clock_minutes={cfg.run.max_wall_clock_minutes}"
             )
-        # every scheduled refresh carries calibration on the persisted holdout
-        controller.maybe_refresh(
-            trainer.updates,
-            calibration_predicted=np.clip(p_hat.predict(cal_anchors), 0.0, 1.0),
-            calibration_realized=cal_realized,
-        )
+        # gate-disabled scopes never refresh; enabled scopes refresh on the
+        # K-schedule with POST-refresh calibration on the persisted holdout
+        if controller.enabled:
+            controller.maybe_refresh(trainer.updates, calibration_fn=calibration_fn)
         remaining = cfg.algo.total_env_steps - trainer.env_step
         rollout = trainer.collect_rollout(max_steps=remaining)
         diags = trainer.update(rollout)
