@@ -33,16 +33,63 @@ sys.modules.setdefault("run_report", run_report)
 _spec.loader.exec_module(run_report)
 
 
+T_975_DF2 = 4.302652729911275  # two-sided 95% t critical value for n=3 seeds
+
+
+def mean_ci(values: list[float]) -> dict:
+    import math
+
+    n = len(values)
+    mean = sum(values) / n
+    if n < 2:
+        return {"mean": mean, "ci95": [mean, mean], "n": n}
+    var = sum((v - mean) ** 2 for v in values) / (n - 1)
+    half = T_975_DF2 * math.sqrt(var / n) if n == 3 else None
+    if half is None:  # generic fallback (not expected under the protocol)
+        half = 2.0 * math.sqrt(var / n)
+    return {"mean": mean, "ci95": [mean - half, mean + half], "n": n}
+
+
 def arm_summary(report: dict) -> dict:
     rates = [s["success_rate_final"] for s in report["seeds"].values()]
     returns = [s["episode_return_mean_final"] for s in report["seeds"].values()]
     return {
         "seeds": report["seeds"],
+        "success_rate": mean_ci(rates),
         "success_rate_mean": sum(rates) / len(rates),
         "success_rate_range": [min(rates), max(rates)],
+        "return": mean_ci(returns),
         "return_mean": sum(returns) / len(returns),
         "return_range": [min(returns), max(returns)],
     }
+
+
+def reap_evidence(runs_dir: str, reap_run: str, seeds: list[int]) -> dict:
+    """Per-seed shaping event and runtime evidence for the REAP arm."""
+    evidence = {}
+    for seed in seeds:
+        seed_dir = Path(runs_dir) / reap_run / f"seed{seed}"
+        entry: dict = {}
+        events_path = seed_dir / "shaping_events.jsonl"
+        if events_path.is_file():
+            events = [json.loads(line) for line in events_path.read_text().splitlines()]
+            gates = [e for e in events if e["type"] == "gate"]
+            refreshes = [e for e in events if e["type"] == "refresh"]
+            entry["gate"] = ({"enabled": gates[0]["enabled"], "reason": gates[0]["reason"]}
+                             if gates else None)
+            entry["refresh_count"] = len(refreshes)
+            cals = [e["calibration"] for e in refreshes if "calibration" in e]
+            if cals:
+                entry["calibration_actions"] = [c["action"] for c in cals]
+                entry["calibration_ece_last"] = cals[-1]["raw_ece"]
+                entry["calibration_brier_last"] = cals[-1]["brier"]
+        metrics_path = seed_dir / "metrics.jsonl"
+        if metrics_path.is_file():
+            last = json.loads(metrics_path.read_text().splitlines()[-1])
+            entry["wall_time_s"] = last.get("diag", {}).get("wall_time_s")
+            entry["gpu_mem_mb"] = last.get("diag", {}).get("gpu_mem_mb")
+        evidence[f"seed{seed}"] = entry
+    return evidence
 
 
 def main(argv=None) -> int:
@@ -54,6 +101,7 @@ def main(argv=None) -> int:
     parser.add_argument("--expected-seeds", required=True)
     parser.add_argument("--expected-env-steps", type=int, required=True)
     parser.add_argument("--quality-report", required=True)
+    parser.add_argument("--calibration-report", default=None)
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
 
@@ -93,6 +141,11 @@ def main(argv=None) -> int:
             ),
         },
         "arms": arms,
+        "evidence": {
+            "quality_report": args.quality_report,
+            "calibration_report": args.calibration_report,
+            "reap_per_seed": reap_evidence(args.runs_dir, args.reap_run, seeds),
+        },
         "outcome_policy": "win, loss, and null results reported with equal prominence",
     }
     out = Path(args.out)
@@ -109,16 +162,23 @@ def main(argv=None) -> int:
         f"**REAP arm shaping:** {'ENABLED' if report['reap_arm_shaping']['enabled'] else 'DISABLED by the scope gate'}.",
         f"Gate detail: {'; '.join(report['reap_arm_shaping']['gate_violations']) or 'gates passed'}.",
         "",
-        "| arm | success rate mean [range] | return mean [range] |",
-        "|-----|---------------------------|----------------------|",
+        "| arm | success rate mean ± 95% CI | return mean ± 95% CI |",
+        "|-----|-----------------------------|------------------------|",
     ]
     for name, a in arms.items():
+        sr, rt = a["success_rate"], a["return"]
         lines.append(
-            f"| {name} | {a['success_rate_mean']:.3f} "
-            f"[{a['success_rate_range'][0]:.3f}, {a['success_rate_range'][1]:.3f}] | "
-            f"{a['return_mean']:.2f} [{a['return_range'][0]:.2f}, {a['return_range'][1]:.2f}] |"
+            f"| {name} | {sr['mean']:.3f} [{sr['ci95'][0]:.3f}, {sr['ci95'][1]:.3f}] | "
+            f"{rt['mean']:.2f} [{rt['ci95'][0]:.2f}, {rt['ci95'][1]:.2f}] |"
         )
-    lines += ["", report["reap_arm_shaping"]["note"] + "."]
+    lines += [
+        "",
+        f"Evidence: quality report `{args.quality_report}`"
+        + (f", calibration report `{args.calibration_report}`" if args.calibration_report else "")
+        + "; per-seed shaping events and wall-clock/GPU-memory in the JSON artifact.",
+        "",
+        report["reap_arm_shaping"]["note"] + ".",
+    ]
     out.with_suffix(".md").write_text("\n".join(lines) + "\n")
     print(json.dumps(report["arms"], indent=2, sort_keys=True))
     return 0
