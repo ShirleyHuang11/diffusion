@@ -63,6 +63,10 @@ class OvercookedSparseEnv(CoopEnv):
         self._mlam = None  # built lazily; only the "features" encoding needs it
 
         self._env.reset()
+        if encoding == "lossless":
+            self.lossless_shape = tuple(
+                np.asarray(self._mdp.lossless_state_encoding(self._env.state)[0]).shape
+            )
         probe_local, probe_joint = self._encode(self._env.state)
         self.local_obs_dim = int(probe_local[0].size)
         self.joint_state_dim = int(probe_joint.size)

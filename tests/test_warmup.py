@@ -124,6 +124,24 @@ def test_warmup_cap_not_marked_truncated_when_gate_met():
     assert report["gate"]["collection_truncated_at_cap"] is False
 
 
+def test_warmup_fallback_runs_after_first_rung_exhausts_share(tmp_path):
+    """Codex round-3 regression: a first rung whose episodes outlast its share
+    must NOT consume the global cap; the fallback rung runs and meets the gate."""
+    env = ChainEnv(length=4, horizon=10)
+    buffer, report = collect_warmup(
+        env,
+        ladder=[("stayer", always_stay), ("solver", always_right)],
+        min_successes=1,
+        max_env_steps=10,  # 5-step share per rung; stayer episodes last 10
+        report_path=tmp_path / "warmup.json",
+    )
+    assert report["gate"]["met"] is True
+    assert report["per_source"]["solver"]["successes"] >= 1
+    assert report["gate"]["rung_truncations"]["stayer"] is True  # share cut it off
+    assert report["gate"]["steps_per_rung"] == 5
+    assert buffer.total_env_steps <= 10
+
+
 def test_warmup_rejects_empty_ladder():
     env = ChainEnv()
     with pytest.raises(ValueError, match="ladder"):

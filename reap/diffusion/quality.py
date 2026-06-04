@@ -53,8 +53,9 @@ def generation_quality_report(
     endpoint_success_rate = None
     if success_fn is not None:
         endpoints = validator.project(sampled_windows[:, -1])
+        starts = validator.project(sampled_windows[:, 0])
         endpoint_success_rate = float(
-            np.mean([bool(success_fn(s)) for s in endpoints])
+            np.mean([bool(success_fn(e, s)) for e, s in zip(endpoints, starts)])
         )
 
     violations = []

@@ -70,18 +70,26 @@ def collect_warmup(
     buffer = TrajectoryBuffer(env.joint_state_dim)
     steps_per_rung = max(1, max_env_steps // len(ladder))
     total_steps = 0
-    truncated_collection = False
+    global_cap_hit = False
+    rung_truncations: dict[str, bool] = {}
 
     for rung_name, policy in ladder:
         rung_steps = 0
+        rung_truncations[rung_name] = False
         while buffer.success_count < min_successes and rung_steps < steps_per_rung:
             local_obs, joint = env.reset()
             states = [joint]
             ep_return = 0.0
             success = False
             while True:
-                if total_steps >= max_env_steps:  # hard global cap, even mid-episode
-                    truncated_collection = True
+                # both budgets are enforced before EVERY env step, so neither a
+                # long episode nor a greedy first rung can starve the fallback
+                if total_steps >= max_env_steps:
+                    global_cap_hit = True
+                    rung_truncations[rung_name] = True
+                    break
+                if rung_steps >= steps_per_rung:
+                    rung_truncations[rung_name] = True
                     break
                 result = env.step(policy(local_obs, joint))
                 rung_steps += 1
@@ -94,18 +102,20 @@ def collect_warmup(
                     break
             if len(states) >= 2:  # a capped partial episode is still useful data
                 buffer.add_episode(np.stack(states), ep_return, success, source=rung_name)
-            if truncated_collection:
-                break
-        if truncated_collection or buffer.success_count >= min_successes:
+            if global_cap_hit or rung_truncations[rung_name]:
+                break  # this rung is done; the next rung may still run
+        if global_cap_hit or buffer.success_count >= min_successes:
             break
 
     report = buffer.report()
     report["gate"] = {
         "min_successes": min_successes,
         "max_env_steps": max_env_steps,
+        "steps_per_rung": steps_per_rung,
         "met": buffer.success_count >= min_successes,
         "ladder": [name for name, _ in ladder],
-        "collection_truncated_at_cap": truncated_collection,
+        "collection_truncated_at_cap": global_cap_hit,
+        "rung_truncations": rung_truncations,
     }
     if report_path is not None:
         report_path = Path(report_path)

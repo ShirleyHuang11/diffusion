@@ -32,7 +32,7 @@ class NothingChecker(TransitionChecker):
         return False
 
 
-def success_fn(state):
+def success_fn(state, start_state=None):
     return bool(np.argmax(state) == LENGTH - 1)
 
 

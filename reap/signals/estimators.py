@@ -59,7 +59,11 @@ def estimate_propensity(
         guidance_scale=guidance_scale, generator=generator,
     )
     endpoints = validator.project(dataset.denormalize(windows[:, -1].numpy()))
-    hits = np.array([bool(success_fn(s)) for s in endpoints], dtype=np.float64)
+    starts = np.repeat(states, samples_per_state, axis=0)
+    hits = np.array(
+        [bool(success_fn(endpoint, start)) for endpoint, start in zip(endpoints, starts)],
+        dtype=np.float64,
+    )
     propensity = hits.reshape(n, samples_per_state).mean(axis=1)
     if np.any((propensity < 0) | (propensity > 1)):
         raise ValueError("propensity outside [0, 1] — estimator invariant violated")

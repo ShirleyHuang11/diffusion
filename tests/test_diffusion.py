@@ -127,7 +127,7 @@ def test_quality_report_passes_on_trained_teacher(trained_teacher, tmp_path):
     report = generation_quality_report(
         denorm,
         validator=OneHotValidator(),
-        success_fn=lambda s: bool(np.argmax(s) == LENGTH - 1),
+        success_fn=lambda s, s0: bool(np.argmax(s) == LENGTH - 1),
         report_path=tmp_path / "quality.json",
     )
     assert report["invalid_state_rate"] <= 0.10
