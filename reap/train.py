@@ -245,6 +245,11 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
     refresh_every = int(params.pop("refresh_every_k_updates", 50))
     beta = float(params.pop("reap_beta", 1.0))
     tau_gate = float(params.pop("tau_gate", 0.5))
+    refresh_mode = params.pop("refresh_mode", "fixed_predictors")
+    teacher_path = params.pop("teacher", "runs/teacher_hybrid_cramped/teacher.pt")
+    probes_path = params.pop(
+        "probe_observations", "runs/teacher_hybrid_cramped/probe_observations.npy"
+    )
 
     env = make_env(cfg.env.id, **_env_kwargs(cfg))
     trainer = MappoTrainer(env, params, seed=cfg.run.seed)
@@ -272,13 +277,36 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
     cal_anchors = payload_npz["calibration_anchors"].astype(np.float32)
     cal_realized = payload_npz["calibration_realized"].astype(np.float64)
 
-    def refresher():
-        # disabled-quality scope: deterministic rebuild from the distilled
-        # predictors over the persisted refresh anchors; the enabled scope
-        # swaps in teacher re-querying with the current policy embedding
-        prop = np.clip(p_hat.predict(refresh_anchors), 0.0, 1.0)
-        feas = np.clip(f_hat.predict(refresh_anchors), 0.0, 1.0)
-        return refresh_anchors, prop, feas
+    if refresh_mode == "policy_conditioned":
+        # enabled scope: re-query the frozen teacher with the CURRENT policy's
+        # behavioral embedding and refit the distilled predictors
+        from reap.hybrid_teacher import PolicyConditionedRefresher, make_teacher_sampler
+        from reap.signals import BehavioralPolicyEmbedding
+
+        if "refresh_anchors_features" not in payload_npz:
+            raise ConfigError(
+                "policy_conditioned refresh requires a hybrid calibration payload "
+                "with paired feature anchors"
+            )
+        refresher = PolicyConditionedRefresher(
+            nets_provider=lambda: trainer.nets,
+            embedding=BehavioralPolicyEmbedding(np.load(probes_path)),
+            sampler=make_teacher_sampler(teacher_path, seed=cfg.run.seed),
+            lossless_anchors=refresh_anchors,
+            feature_anchors=payload_npz["refresh_anchors_features"].astype(np.float32),
+            feasibility=np.clip(f_hat.predict(refresh_anchors), 0.0, 1.0),
+            p_hat=p_hat,
+            f_hat=f_hat,
+        )
+    elif refresh_mode == "fixed_predictors":
+        def refresher():
+            # disabled-quality scope: deterministic rebuild from the distilled
+            # predictors over the persisted refresh anchors
+            prop = np.clip(p_hat.predict(refresh_anchors), 0.0, 1.0)
+            feas = np.clip(f_hat.predict(refresh_anchors), 0.0, 1.0)
+            return refresh_anchors, prop, feas
+    else:
+        raise ConfigError(f"unknown refresh_mode {refresh_mode!r}")
 
     potential = ReapPotential(tau_gate=tau_gate)
     states0, prop0, feas0 = refresher()

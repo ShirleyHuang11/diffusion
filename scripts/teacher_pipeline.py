@@ -34,9 +34,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--distill-hidden", type=int, default=256)
     parser.add_argument("--distill-epochs", type=int, default=600)
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--hybrid", action="store_true",
+                        help="run the hybrid features-encoding pipeline")
+    parser.add_argument("--window", type=int, default=None)
     args = parser.parse_args(argv)
 
     seed_everything(args.seed)
+    if args.hybrid:
+        from reap.hybrid_teacher import run_hybrid_pipeline
+
+        summary = run_hybrid_pipeline(
+            seed=args.seed,
+            teacher_steps=args.teacher_steps,
+            min_successes=args.min_successes,
+            max_warmup_steps=args.max_warmup_steps,
+            d_model=args.d_model,
+            num_layers=args.num_layers,
+            nhead=args.nhead,
+            n_anchors=args.n_anchors if args.n_anchors is not None else 48,
+            distill_hidden=args.distill_hidden,
+            distill_epochs=args.distill_epochs,
+            device=args.device,
+            **({"window": args.window} if args.window else {}),
+        )
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        return 0
     summary = run_pipeline(
         seed=args.seed,
         teacher_steps=args.teacher_steps,
