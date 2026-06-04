@@ -1,0 +1,65 @@
+{
+  "check": "PBRS invariance sanity check (not a statistical claim)",
+  "comparison": {
+    "episode_return_mean_final": {
+      "comparable": true,
+      "shaped": {
+        "max": 196.6,
+        "mean": 193.73333333333335,
+        "min": 189.6,
+        "values": [
+          195.0,
+          196.6,
+          189.6
+        ]
+      },
+      "unshaped": {
+        "max": 202.4,
+        "mean": 193.86666666666667,
+        "min": 183.8,
+        "values": [
+          202.4,
+          183.8,
+          195.4
+        ]
+      }
+    },
+    "success_rate_final": {
+      "comparable": true,
+      "shaped": {
+        "max": 1.0,
+        "mean": 0.9966666666666667,
+        "min": 0.99,
+        "values": [
+          1.0,
+          1.0,
+          0.99
+        ]
+      },
+      "unshaped": {
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "values": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  },
+  "invariance_holds": true,
+  "metric_basis": "extrinsic channel only (task success rate, episode return)",
+  "potential_definition": "overcooked_progress (reap/envs/overcooked_env.py::progress_potential): 0.05*min(ingredients_loaded,6) + 0.30*min(soups_ready,2) + 0.15*min(held_dishes,2) + 0.50*min(held_soups,2); beta=5.0, gamma equal to the MAPPO discount; potential is zero at every episode end.",
+  "protocol": {
+    "expected_env_steps": 5000000,
+    "expected_seeds": [
+      0,
+      1,
+      2
+    ],
+    "shaped_run": "invariance_shaped_rnd_cramped",
+    "tolerance": 0.15,
+    "unshaped_run": "probe_mappo_rnd_cramped"
+  }
+}
