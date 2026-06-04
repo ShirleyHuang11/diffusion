@@ -253,6 +253,80 @@ def anchor_outcomes(
     return np.stack(anchors), np.array(outcomes, dtype=np.float64)
 
 
+def build_calibration_payload(
+    teacher_dir: str | Path,
+    window: int = 32,
+    seed: int = 0,
+    per_episode_refresh: int = 4,
+    per_episode_calibration: int = 3,
+    max_calibration: int = 48,
+) -> dict:
+    """Rebuild the integrated-loop calibration payload from a saved buffer.
+
+    The train/holdout EPISODE split is reproduced exactly (the split
+    permutation is the first consumption of the pipeline's seeded generator).
+    Anchor draws within episodes use a fresh documented sub-seed — valid
+    because disjointness is episode-level, not anchor-level.
+    """
+    from reap.signals.potential import state_key
+
+    teacher_dir = Path(teacher_dir)
+    buffer = TrajectoryBuffer.load(teacher_dir / "warmup_buffer.npz")
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(len(buffer.episodes))
+    holdout_count = max(2, len(indices) // 5)
+    holdout_idx = set(indices[:holdout_count].tolist())
+    train_eps = [buffer.episodes[i] for i in range(len(buffer.episodes)) if i not in holdout_idx]
+    holdout_eps = [buffer.episodes[i] for i in sorted(holdout_idx)]
+
+    anchor_rng = np.random.default_rng(seed + 1000)  # documented fresh sub-seed
+    raw_refresh, _ = anchor_outcomes(train_eps, window, per_episode_refresh, anchor_rng)
+    seen: dict[bytes, int] = {}
+    for i, anchor in enumerate(raw_refresh):
+        seen.setdefault(state_key(anchor), i)
+    refresh_anchors = raw_refresh[[i for _, i in sorted(seen.items(), key=lambda kv: kv[0])]]
+
+    cal_anchors, cal_realized = anchor_outcomes(
+        holdout_eps, window, per_episode_calibration, anchor_rng
+    )
+    keep = anchor_rng.choice(
+        len(cal_anchors), size=min(max_calibration, len(cal_anchors)), replace=False
+    )
+    cal_anchors, cal_realized = cal_anchors[keep], cal_realized[keep]
+
+    provenance = {
+        "method": "rebuilt from saved warmup buffer; episode split reproduced "
+                  "from the pipeline seed (first rng consumption); anchor draws "
+                  "use fresh sub-seed seed+1000",
+        "window": window,
+        "seed": seed,
+        "episodes_train": len(train_eps),
+        "episodes_holdout": len(holdout_eps),
+        "holdout_episode_indices": sorted(holdout_idx),
+    }
+    out_path = teacher_dir / "calibration_holdout.npz"
+    np.savez_compressed(
+        out_path,
+        refresh_anchors=refresh_anchors,
+        calibration_anchors=cal_anchors,
+        calibration_realized=cal_realized,
+        provenance=json.dumps(provenance),
+        disjointness=(
+            "episode-level split; calibration episodes never enter teacher "
+            "training windows"
+        ),
+    )
+    return {
+        "path": str(out_path),
+        "refresh_anchors": int(len(refresh_anchors)),
+        "calibration_anchors": int(len(cal_anchors)),
+        "train_episode_indices": sorted(
+            set(range(len(buffer.episodes))) - holdout_idx
+        ),
+        "holdout_episode_indices": sorted(holdout_idx),
+    }
+
+
 def run_pipeline(
     layout: str = "cramped_room",
     horizon: int = 400,
@@ -485,6 +559,20 @@ def run_pipeline(
     }
     (reports_dir / "calibration_cramped.json").write_text(
         json.dumps(cal_report, indent=2, sort_keys=True)
+    )
+
+    # durable calibration payload for the integrated training loop: refresh
+    # anchors (train side) + calibration anchors/outcomes (holdout side)
+    np.savez_compressed(
+        out_dir / "calibration_holdout.npz",
+        refresh_anchors=train_anchors,
+        calibration_anchors=holdout_anchors,
+        calibration_realized=holdout_realized,
+        provenance=json.dumps(provenance),
+        disjointness=(
+            "episode-level split; calibration episodes never enter teacher "
+            "training windows"
+        ),
     )
 
     # feasibility/propensity direct queries over ALL kept anchors, chunked so

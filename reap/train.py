@@ -234,9 +234,14 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
     from reap.calibration import CalibrationLadder
     from reap.signals.distill import DistilledPredictor
 
+    from reap.signals.potential import ReapPotential
+
     params = dict(cfg.algo.params)
     quality_path = params.pop("quality_report", "reports/teacher_quality_cramped.json")
     predictors_path = params.pop("predictors", "runs/teacher_cramped/predictors.pt")
+    payload_path = params.pop(
+        "calibration_payload", "runs/teacher_cramped/calibration_holdout.npz"
+    )
     refresh_every = int(params.pop("refresh_every_k_updates", 50))
     beta = float(params.pop("reap_beta", 1.0))
     tau_gate = float(params.pop("tau_gate", 0.5))
@@ -254,18 +259,37 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
     f_hat = DistilledPredictor(state_dim, hidden=predictor_state["f_hat"]["net"]["0.weight"].shape[0])
     f_hat.load_state_dict(predictor_state["f_hat"])
 
-    events_path = out_dir / "shaping_events.jsonl"
+    # scheduled refreshes must be calibrated: refuse to run without the
+    # persisted, episode-disjoint calibration payload
+    if not Path(payload_path).is_file():
+        raise ConfigError(
+            f"calibration payload not found: {payload_path}; reap_mappo refuses "
+            "uncalibrated refreshes (build it via reap.teacher_pipeline."
+            "build_calibration_payload or rerun the teacher pipeline)"
+        )
+    payload_npz = np.load(payload_path, allow_pickle=True)
+    refresh_anchors = payload_npz["refresh_anchors"].astype(np.float32)
+    cal_anchors = payload_npz["calibration_anchors"].astype(np.float32)
+    cal_realized = payload_npz["calibration_realized"].astype(np.float64)
 
-    def event_sink(event: dict) -> None:  # events land on disk as they occur
-        with events_path.open("a") as fh:
-            fh.write(json.dumps(event, sort_keys=True) + "\n")
+    def refresher():
+        # disabled-quality scope: deterministic rebuild from the distilled
+        # predictors over the persisted refresh anchors; the enabled scope
+        # swaps in teacher re-querying with the current policy embedding
+        prop = np.clip(p_hat.predict(refresh_anchors), 0.0, 1.0)
+        feas = np.clip(f_hat.predict(refresh_anchors), 0.0, 1.0)
+        return refresh_anchors, prop, feas
+
+    potential = ReapPotential(tau_gate=tau_gate)
+    states0, prop0, feas0 = refresher()
+    potential.update_tables(states0, prop0, feas0)
 
     controller = ReapShapingController(
-        potential=PredictorPotential(p_hat, f_hat, tau_gate),
+        potential=potential,
         ladder=CalibrationLadder(beta=beta),
         quality_report=quality,
         refresh_every_updates=refresh_every,
-        event_sink=event_sink,
+        refresher=refresher,
     )
     trainer.shaping_provider = controller
 
@@ -278,6 +302,20 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
         payload = load_checkpoint(ckpt_path)
         trainer.load_state_dict(payload["trainer"])
         controller.load_state_dict(payload["controller"])
+
+    events_path = out_dir / "shaping_events.jsonl"
+
+    def event_sink(event: dict) -> None:  # events land on disk as they occur
+        with events_path.open("a") as fh:
+            fh.write(json.dumps(event, sort_keys=True) + "\n")
+
+    # attach the sink AFTER any resume restore so a resumed run does not
+    # append a duplicate construction-time gate event; fresh runs flush the
+    # buffered gate event exactly once
+    controller.event_sink = event_sink
+    if not resume:
+        for buffered in controller.events:
+            event_sink(buffered)
 
     start_time = time.monotonic()
     deadline = start_time + cfg.run.max_wall_clock_minutes * 60
@@ -309,42 +347,54 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
     last_logged = -1
     rollout: dict | None = None
     diags: dict = {}
+
+    def log_now(rollout: dict, diags: dict) -> None:
+        nonlocal last_logged
+        logger.log(
+            trainer.env_step,
+            extrinsic=trainer.episode_stats(),
+            shaped={
+                "term_mean": float(rollout["shaping"].mean()),
+                "term_abs_max": float(np.abs(rollout["shaping"]).max()),
+                "snapshot_id": float(rollout["shaping_snapshot"] or 0),
+                "enabled": float(controller.enabled),
+            },
+            intrinsic={"bonus_mean": float(rollout["intrinsic"].mean())},
+            diag={
+                **diags,
+                "updates": float(trainer.updates),
+                "refresh_count": float(controller.refresh_count),
+                "wall_time_s": time.monotonic() - start_time,
+                "gpu_mem_mb": gpu_mem_mb(),
+            },
+        )
+        last_logged = trainer.env_step
+
     while trainer.env_step < cfg.algo.total_env_steps:
         if time.monotonic() > deadline:
             save()
             raise WallClockExceeded(
                 f"run exceeded max_wall_clock_minutes={cfg.run.max_wall_clock_minutes}"
             )
-        controller.maybe_refresh(trainer.updates)
+        # every scheduled refresh carries calibration on the persisted holdout
+        controller.maybe_refresh(
+            trainer.updates,
+            calibration_predicted=np.clip(p_hat.predict(cal_anchors), 0.0, 1.0),
+            calibration_realized=cal_realized,
+        )
         remaining = cfg.algo.total_env_steps - trainer.env_step
         rollout = trainer.collect_rollout(max_steps=remaining)
         diags = trainer.update(rollout)
 
         if trainer.env_step >= next_log:
-            logger.log(
-                trainer.env_step,
-                extrinsic=trainer.episode_stats(),
-                shaped={
-                    "term_mean": float(rollout["shaping"].mean()),
-                    "term_abs_max": float(np.abs(rollout["shaping"]).max()),
-                    "snapshot_id": float(rollout["shaping_snapshot"] or 0),
-                    "enabled": float(controller.enabled),
-                },
-                intrinsic={"bonus_mean": float(rollout["intrinsic"].mean())},
-                diag={
-                    **diags,
-                    "updates": float(trainer.updates),
-                    "refresh_count": float(controller.refresh_count),
-                    "wall_time_s": time.monotonic() - start_time,
-                    "gpu_mem_mb": gpu_mem_mb(),
-                },
-            )
-            last_logged = trainer.env_step
+            log_now(rollout, diags)
             next_log = grid_next(cfg.logging.interval_env_steps)
         if trainer.env_step >= next_ckpt:
             save()
             next_ckpt = grid_next(cfg.checkpoint.interval_env_steps)
 
+    if rollout is not None and trainer.env_step != last_logged:
+        log_now(rollout, diags)  # final record at exactly the budget step
     save()
     return {"env_step": trainer.env_step, **trainer.episode_stats(),
             "shaping_enabled": controller.enabled}

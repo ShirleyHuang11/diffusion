@@ -110,12 +110,21 @@ class TrajectoryBuffer:
     def load(cls, path: str | Path) -> "TrajectoryBuffer":
         data = np.load(Path(path), allow_pickle=True)
         buffer = cls(int(data["state_dim"]))
-        offsets = np.concatenate([[0], np.cumsum(data["lengths"])])
-        for i in range(len(data["lengths"])):
+        # materialize each npz member exactly once: indexing `data["states"]`
+        # per episode re-decompresses the full array every time and keeps a
+        # private base alive behind each slice (observed 24 GB for a 1.7 MB
+        # file); a single materialized array shares one base across episodes
+        flat_states = np.asarray(data["states"], dtype=np.float32)
+        lengths = np.asarray(data["lengths"])
+        returns = np.asarray(data["returns"])
+        successes = np.asarray(data["successes"])
+        sources = data["sources"]
+        offsets = np.concatenate([[0], np.cumsum(lengths)])
+        for i in range(len(lengths)):
             buffer.add_episode(
-                data["states"][offsets[i] : offsets[i + 1]],
-                ret=float(data["returns"][i]),
-                success=bool(data["successes"][i]),
-                source=str(data["sources"][i]),
+                flat_states[offsets[i] : offsets[i + 1]],
+                ret=float(returns[i]),
+                success=bool(successes[i]),
+                source=str(sources[i]),
             )
         return buffer

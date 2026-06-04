@@ -145,6 +145,144 @@ def test_predictor_potential_gates_on_f_hat():
     assert open_potential.value(states[0], 5) == pytest.approx(0.9, abs=0.1)
 
 
+def test_build_calibration_payload_disjoint_split(tmp_path):
+    """The payload builder reproduces an episode-level disjoint split."""
+    from reap.data import TrajectoryBuffer
+    from reap.teacher_pipeline import build_calibration_payload
+
+    rng = np.random.default_rng(0)
+    buffer = TrajectoryBuffer(state_dim=6)
+    for i in range(20):
+        states = rng.normal(size=(12, 6)).astype(np.float32)
+        states[:, -1] = (np.arange(12) > 8).astype(np.float32) * 0.1  # late delivery
+        buffer.add_episode(states, ret=float(i % 2), success=i % 2 == 0, source="t")
+    buffer.save(tmp_path / "warmup_buffer.npz")
+
+    info = build_calibration_payload(tmp_path, window=4, seed=0)
+    assert info["refresh_anchors"] > 0
+    assert info["calibration_anchors"] > 0
+    train_set = set(info["train_episode_indices"])
+    holdout_set = set(info["holdout_episode_indices"])
+    assert train_set and holdout_set and not (train_set & holdout_set)
+    payload = np.load(tmp_path / "calibration_holdout.npz", allow_pickle=True)
+    assert {"refresh_anchors", "calibration_anchors", "calibration_realized",
+            "provenance", "disjointness"} <= set(payload.files)
+
+
+def _reap_cfg(tmp_path, name, total_steps, log_every=64, ckpt_every=128,
+              refresh_every=1):
+    from reap.config import (
+        AlgoConfig, CheckpointConfig, Config, EnvConfig, LoggingConfig, RunConfig,
+    )
+
+    return Config(
+        run=RunConfig(name=name, seed=0, mode="smoke",
+                      out_dir=str(tmp_path / "runs"), max_wall_clock_minutes=20.0,
+                      device="cpu"),
+        env=EnvConfig(id="overcooked", layout="cramped_room", horizon=50,
+                      encoding="lossless"),
+        algo=AlgoConfig(name="reap_mappo", total_env_steps=total_steps, params={
+            "rollout_length": 64, "hidden_size": 32, "update_epochs": 1,
+            "num_minibatches": 2, "refresh_every_k_updates": refresh_every,
+        }),
+        logging=LoggingConfig(interval_env_steps=log_every),
+        checkpoint=CheckpointConfig(interval_env_steps=ckpt_every, keep_last=1),
+    )
+
+
+def _skip_without_artifacts():
+    from pathlib import Path
+
+    pytest.importorskip("overcooked_ai_py")
+    if not Path("runs/teacher_cramped/predictors.pt").is_file():
+        pytest.skip("teacher predictors not present in this checkout")
+    if not Path("runs/teacher_cramped/calibration_holdout.npz").is_file():
+        pytest.skip("calibration payload not present in this checkout")
+
+
+@pytest.mark.overcooked
+def test_reap_mappo_refreshes_are_real_and_calibrated(tmp_path):
+    """Every scheduled refresh refreshes real states AND carries calibration."""
+    import json
+
+    _skip_without_artifacts()
+    from reap.train import run_from_config
+
+    cfg = _reap_cfg(tmp_path, "reapcal", total_steps=192, refresh_every=1)
+    run_from_config(cfg)
+    events = [json.loads(line) for line in
+              (tmp_path / "runs" / "reapcal" / "seed0" / "shaping_events.jsonl")
+              .read_text().splitlines()]
+    refreshes = [e for e in events if e["type"] == "refresh"]
+    assert refreshes, "no refresh events recorded"
+    for event in refreshes:
+        assert event["refreshed_states"] > 0
+        assert "note" not in event  # never "no refresher configured"
+        cal = event["calibration"]
+        assert {"raw_ece", "brier", "action", "beta_after", "alert"} <= set(cal)
+
+
+@pytest.mark.overcooked
+def test_reap_mappo_final_record_at_exact_budget(tmp_path):
+    """Non-divisible budget/log-interval still ends with a record at the budget."""
+    _skip_without_artifacts()
+    from reap.metrics import read_jsonl
+    from reap.train import run_from_config
+
+    cfg = _reap_cfg(tmp_path, "reapfinal", total_steps=70, log_every=64,
+                    refresh_every=50)
+    summary = run_from_config(cfg)
+    assert summary["env_step"] == 70
+    records = read_jsonl(tmp_path / "runs" / "reapfinal" / "seed0" / "metrics.jsonl")
+    assert records[-1]["env_step"] == 70
+
+
+@pytest.mark.overcooked
+def test_reap_mappo_resume_no_duplicate_gate_event(tmp_path):
+    import dataclasses
+    import json
+
+    _skip_without_artifacts()
+    from reap.train import run_from_config
+
+    cfg = _reap_cfg(tmp_path, "reapresume", total_steps=64, ckpt_every=64,
+                    refresh_every=50)
+    run_from_config(cfg)
+    cfg_more = dataclasses.replace(
+        cfg, algo=dataclasses.replace(cfg.algo, total_env_steps=128)
+    )
+    run_from_config(cfg_more, resume=True)
+    events = [json.loads(line) for line in
+              (tmp_path / "runs" / "reapresume" / "seed0" / "shaping_events.jsonl")
+              .read_text().splitlines()]
+    gate_events = [e for e in events if e["type"] == "gate"]
+    assert len(gate_events) == 1  # resume must not append a duplicate
+
+
+@pytest.mark.overcooked
+def test_reap_mappo_refuses_missing_calibration_payload(tmp_path):
+    pytest.importorskip("overcooked_ai_py")
+    from pathlib import Path
+
+    if not Path("runs/teacher_cramped/predictors.pt").is_file():
+        pytest.skip("teacher predictors not present in this checkout")
+    import dataclasses
+
+    from reap.config import ConfigError
+    from reap.train import run_from_config
+
+    cfg = _reap_cfg(tmp_path, "reapnopayload", total_steps=64)
+    cfg = dataclasses.replace(
+        cfg,
+        algo=dataclasses.replace(
+            cfg.algo,
+            params={**cfg.algo.params, "calibration_payload": str(tmp_path / "absent.npz")},
+        ),
+    )
+    with pytest.raises(ConfigError, match="calibration payload"):
+        run_from_config(cfg)
+
+
 @pytest.mark.overcooked
 def test_reap_mappo_runner_disabled_path_smoke(tmp_path):
     """End-to-end reap_mappo smoke on the real committed artifacts: shaping is
