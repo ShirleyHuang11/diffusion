@@ -111,9 +111,18 @@ class MappoTrainer:
 
     # -- rollout -----------------------------------------------------------
 
-    def collect_rollout(self) -> dict:
-        """Collect one on-policy rollout; returns tensors for the update."""
+    def collect_rollout(self, max_steps: int | None = None) -> dict:
+        """Collect one on-policy rollout; returns tensors for the update.
+
+        ``max_steps`` truncates the rollout so a run can stop at exactly its
+        configured environment-step budget instead of overshooting by up to
+        one rollout length.
+        """
         T, N = self.p["rollout_length"], self.env.num_agents
+        if max_steps is not None:
+            T = min(T, int(max_steps))
+        if T <= 0:
+            raise ValueError(f"rollout length must be positive, got {T}")
         local_obs = np.empty((T, N, self.env.local_obs_dim), dtype=np.float32)
         joint_states = np.empty((T, self.env.joint_state_dim), dtype=np.float32)
         next_joints = np.empty_like(joint_states)
@@ -184,7 +193,7 @@ class MappoTrainer:
 
     def update(self, rollout: dict) -> dict:
         """One PPO update on a collected rollout; returns loss diagnostics."""
-        T, N = self.p["rollout_length"], self.env.num_agents
+        T, N = len(rollout["extrinsic"]), self.env.num_agents
         rewards = rollout["extrinsic"] + rollout["intrinsic"]
         advantages, returns = self._gae(
             rewards, rollout["dones"], rollout["values"], rollout["last_value"]
@@ -202,7 +211,7 @@ class MappoTrainer:
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
         idx = np.arange(T)
-        batch_size = T // self.p["num_minibatches"]
+        batch_size = max(1, T // self.p["num_minibatches"])  # tiny final rollouts
         diags = {"policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0}
         steps = 0
         for _ in range(self.p["update_epochs"]):

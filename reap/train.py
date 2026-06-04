@@ -167,35 +167,46 @@ def run_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
         )
         prune_checkpoints(ckpt_dir, cfg.checkpoint.keep_last)
 
+    last_logged = -1
+    rollout: dict | None = None
+    diags: dict = {}
+
+    def log_now(rollout: dict, diags: dict) -> None:
+        nonlocal last_logged
+        logger.log(
+            trainer.env_step,
+            extrinsic=trainer.episode_stats(),
+            intrinsic={
+                "bonus_mean": float(rollout["intrinsic"].mean()),
+                **{k: v for k, v in rollout["bonus_diag"].items()},
+            },
+            diag={
+                **diags,
+                "updates": float(trainer.updates),
+                "wall_time_s": time.monotonic() - start_time,
+            },
+        )
+        last_logged = trainer.env_step
+
     while trainer.env_step < cfg.algo.total_env_steps:
         if time.monotonic() > deadline:
             save()  # long runs preserve progress before stopping
             raise WallClockExceeded(
                 f"run exceeded max_wall_clock_minutes={cfg.run.max_wall_clock_minutes}"
             )
-        rollout = trainer.collect_rollout()
+        remaining = cfg.algo.total_env_steps - trainer.env_step
+        rollout = trainer.collect_rollout(max_steps=remaining)
         diags = trainer.update(rollout)
 
         if trainer.env_step >= next_log:
-            stats = trainer.episode_stats()
-            logger.log(
-                trainer.env_step,
-                extrinsic=stats,
-                intrinsic={
-                    "bonus_mean": float(rollout["intrinsic"].mean()),
-                    **{k: v for k, v in rollout["bonus_diag"].items()},
-                },
-                diag={
-                    **diags,
-                    "updates": float(trainer.updates),
-                    "wall_time_s": time.monotonic() - start_time,
-                },
-            )
+            log_now(rollout, diags)
             next_log = grid_next(cfg.logging.interval_env_steps)
         if trainer.env_step >= next_ckpt:
             save()
             next_ckpt = grid_next(cfg.checkpoint.interval_env_steps)
 
+    if rollout is not None and trainer.env_step != last_logged:
+        log_now(rollout, diags)  # final record lands exactly at the budget step
     save()
     final = trainer.episode_stats()
     return {"env_step": trainer.env_step, **final}

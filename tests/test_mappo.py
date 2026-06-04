@@ -120,6 +120,16 @@ def test_mappo_count_bonus_runs(tmp_path):
     assert any(r["intrinsic"].get("count_table_size", 0) > 0 for r in records)
 
 
+def test_mappo_stops_exactly_at_budget(tmp_path):
+    """Runs end at exactly total_env_steps even when the budget is not a
+    multiple of the rollout length (final rollout is truncated)."""
+    cfg = make_cfg(tmp_path, total_steps=150, ckpt_every=150)  # 64+64+22
+    summary = run_from_config(cfg)
+    assert summary["env_step"] == 150
+    records = read_jsonl(run_dir(cfg) / "metrics.jsonl")
+    assert records[-1]["env_step"] == 150
+
+
 def test_mappo_unknown_param_rejected(tmp_path):
     from reap.algos.mappo import MappoTrainer
     from reap.envs import make_env
