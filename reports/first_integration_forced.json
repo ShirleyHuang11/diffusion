@@ -1,0 +1,133 @@
+{
+  "arms": {
+    "mappo_rnd": {
+      "return_mean": 163.26666666666665,
+      "return_range": [
+        153.6,
+        174.6
+      ],
+      "seeds": {
+        "seed0": {
+          "env_step_final": 5000000,
+          "episode_return_mean_final": 174.6,
+          "episodes_total": 12500.0,
+          "records": 200,
+          "success_rate_final": 1.0
+        },
+        "seed1": {
+          "env_step_final": 5000000,
+          "episode_return_mean_final": 161.6,
+          "episodes_total": 12500.0,
+          "records": 200,
+          "success_rate_final": 0.99
+        },
+        "seed2": {
+          "env_step_final": 5000000,
+          "episode_return_mean_final": 153.6,
+          "episodes_total": 12500.0,
+          "records": 200,
+          "success_rate_final": 1.0
+        }
+      },
+      "success_rate_mean": 0.9966666666666667,
+      "success_rate_range": [
+        0.99,
+        1.0
+      ]
+    },
+    "reap": {
+      "return_mean": 0.0,
+      "return_range": [
+        0.0,
+        0.0
+      ],
+      "seeds": {
+        "seed0": {
+          "env_step_final": 5000000,
+          "episode_return_mean_final": 0.0,
+          "episodes_total": 12500.0,
+          "records": 200,
+          "success_rate_final": 0.0
+        },
+        "seed1": {
+          "env_step_final": 5000000,
+          "episode_return_mean_final": 0.0,
+          "episodes_total": 12500.0,
+          "records": 200,
+          "success_rate_final": 0.0
+        },
+        "seed2": {
+          "env_step_final": 5000000,
+          "episode_return_mean_final": 0.0,
+          "episodes_total": 12500.0,
+          "records": 200,
+          "success_rate_final": 0.0
+        }
+      },
+      "success_rate_mean": 0.0,
+      "success_rate_range": [
+        0.0,
+        0.0
+      ]
+    },
+    "vanilla_mappo": {
+      "return_mean": 0.0,
+      "return_range": [
+        0.0,
+        0.0
+      ],
+      "seeds": {
+        "seed0": {
+          "env_step_final": 5000000,
+          "episode_return_mean_final": 0.0,
+          "episodes_total": 12500.0,
+          "records": 200,
+          "success_rate_final": 0.0
+        },
+        "seed1": {
+          "env_step_final": 5000000,
+          "episode_return_mean_final": 0.0,
+          "episodes_total": 12500.0,
+          "records": 200,
+          "success_rate_final": 0.0
+        },
+        "seed2": {
+          "env_step_final": 5000000,
+          "episode_return_mean_final": 0.0,
+          "episodes_total": 12500.0,
+          "records": 200,
+          "success_rate_final": 0.0
+        }
+      },
+      "success_rate_mean": 0.0,
+      "success_rate_range": [
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "experiment": "first integration: REAP vs vanilla MAPPO vs MAPPO+RND",
+  "outcome_policy": "win, loss, and null results reported with equal prominence",
+  "protocol": {
+    "arms": {
+      "mappo_rnd": "first_integration_rnd_forced",
+      "reap": "first_integration_reap_forced",
+      "vanilla_mappo": "hardness_mappo_forced"
+    },
+    "expected_env_steps": 5000000,
+    "expected_seeds": [
+      0,
+      1,
+      2
+    ],
+    "metric_basis": "extrinsic channel only (success rate, episode return)"
+  },
+  "reap_arm_shaping": {
+    "enabled": false,
+    "gate_violations": [
+      "warmup ladder collected 0 successful episodes (< required 25) within 120000 env steps; teacher training must not proceed on this scope"
+    ],
+    "note": "the REAP arm ran with shaping DISABLED by the scope-specific teacher-quality gate; its result is therefore expected to match vanilla MAPPO up to seed noise"
+  },
+  "task": "Overcooked-AI Forced Coordination, sparse delivery-only reward"
+}
