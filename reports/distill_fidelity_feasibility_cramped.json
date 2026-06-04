@@ -1,0 +1,7 @@
+{
+  "holdout_states": 12,
+  "mae": 0.005026204472718139,
+  "mae_max": 0.1,
+  "max_abs_error": 0.010263887234032154,
+  "passed": true
+}

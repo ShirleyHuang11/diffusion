@@ -1,0 +1,33 @@
+{
+  "calibration": {
+    "action": "recalibrated",
+    "beta_after": 1.0,
+    "brier": 0.19978841145833334,
+    "raw_ece": 0.18880208333333334
+  },
+  "distill_f_hat": {
+    "mae": 0.005026204472718139,
+    "passed": true
+  },
+  "distill_p_hat": {
+    "mae": 0.05814735094706217,
+    "passed": true
+  },
+  "feasibility_mean": 0.0,
+  "propensity_holdout_mean": 0.13671875,
+  "quality": {
+    "bridge_consistency_rate": 0.0,
+    "endpoint_success_rate": 0.125,
+    "invalid_state_rate": 0.8704427083333334,
+    "shaping_enabled": false
+  },
+  "realized_holdout_mean": 0.22916666666666666,
+  "teacher_loss_first20": 1.1042903423309327,
+  "teacher_loss_last20": 0.7630210489034652,
+  "warmup": {
+    "episodes": 175,
+    "success_count": 25,
+    "total_env_steps": 70000
+  },
+  "warmup_gate_met": true
+}

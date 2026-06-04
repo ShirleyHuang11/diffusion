@@ -1,0 +1,85 @@
+{
+  "action": "recalibrated",
+  "alert": false,
+  "beta_after": 1.0,
+  "beta_before": 1.0,
+  "bins": [
+    {
+      "count": 14,
+      "hi": 0.1,
+      "lo": 0.0,
+      "predicted_mean": 0.05357142857142857,
+      "realized_mean": 0.2857142857142857
+    },
+    {
+      "count": 26,
+      "hi": 0.2,
+      "lo": 0.1,
+      "predicted_mean": 0.1346153846153846,
+      "realized_mean": 0.2692307692307692
+    },
+    {
+      "count": 4,
+      "hi": 0.30000000000000004,
+      "lo": 0.2,
+      "predicted_mean": 0.25,
+      "realized_mean": 0.0
+    },
+    {
+      "count": 4,
+      "hi": 0.4,
+      "lo": 0.30000000000000004,
+      "predicted_mean": 0.328125,
+      "realized_mean": 0.0
+    },
+    {
+      "count": 0,
+      "hi": 0.5,
+      "lo": 0.4,
+      "predicted_mean": null,
+      "realized_mean": null
+    },
+    {
+      "count": 0,
+      "hi": 0.6000000000000001,
+      "lo": 0.5,
+      "predicted_mean": null,
+      "realized_mean": null
+    },
+    {
+      "count": 0,
+      "hi": 0.7000000000000001,
+      "lo": 0.6000000000000001,
+      "predicted_mean": null,
+      "realized_mean": null
+    },
+    {
+      "count": 0,
+      "hi": 0.8,
+      "lo": 0.7000000000000001,
+      "predicted_mean": null,
+      "realized_mean": null
+    },
+    {
+      "count": 0,
+      "hi": 0.9,
+      "lo": 0.8,
+      "predicted_mean": null,
+      "realized_mean": null
+    },
+    {
+      "count": 0,
+      "hi": 1.0,
+      "lo": 0.9,
+      "predicted_mean": null,
+      "realized_mean": null
+    }
+  ],
+  "brier": 0.19978841145833334,
+  "ece_gate": 0.15,
+  "holdout_anchors": 48,
+  "holdout_disjointness": "episode-level split; holdout episodes never enter teacher training windows (ensure_disjoint on episode ids)",
+  "post_isotonic_ece": 0.041666666666666775,
+  "post_isotonic_resolution": 0.05212860351426869,
+  "raw_ece": 0.18880208333333334
+}

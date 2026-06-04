@@ -1,0 +1,16 @@
+{
+  "bridge_consistency_rate": 0.0,
+  "endpoint_success_rate": 0.125,
+  "gate_violations": [
+    "invalid_state_rate 0.870 > 0.1",
+    "bridge_consistency_rate 0.000 < 0.8"
+  ],
+  "gates": {
+    "bridge_consistency_min": 0.8,
+    "invalid_state_rate_max": 0.1
+  },
+  "invalid_state_rate": 0.8704427083333334,
+  "samples": 192,
+  "shaping_enabled": false,
+  "window": 32
+}
