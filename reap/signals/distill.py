@@ -23,6 +23,7 @@ class DistilledPredictor:
     def __init__(self, state_dim: int, hidden: int = 64, lr: float = 1e-3, seed: int = 0):
         torch.manual_seed(seed)
         self.state_dim = state_dim
+        self.hidden = hidden
         self.net = nn.Sequential(
             nn.Linear(state_dim, hidden),
             nn.ReLU(),
@@ -31,6 +32,12 @@ class DistilledPredictor:
             nn.Linear(hidden, 1),
         )
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
+        # input normalization fitted on the training table and reused at predict
+        self.input_mean = np.zeros(state_dim, dtype=np.float32)
+        self.input_std = np.ones(state_dim, dtype=np.float32)
+
+    def _normalize(self, states: np.ndarray) -> np.ndarray:
+        return (np.asarray(states, dtype=np.float32) - self.input_mean) / self.input_std
 
     def fit(
         self,
@@ -46,7 +53,9 @@ class DistilledPredictor:
             raise ValueError("states and targets must have equal length")
         if np.any((targets < 0) | (targets > 1)):
             raise ValueError("targets must lie in [0, 1]")
-        x = torch.as_tensor(states)
+        self.input_mean = states.mean(axis=0)
+        self.input_std = states.std(axis=0) + 1e-6
+        x = torch.as_tensor(self._normalize(states))
         y = torch.as_tensor(targets).unsqueeze(-1)
         rng = np.random.default_rng(seed)
         history = []
@@ -67,9 +76,9 @@ class DistilledPredictor:
         return history
 
     def predict(self, states: np.ndarray) -> np.ndarray:
-        states = np.asarray(states, dtype=np.float32)
+        normalized = self._normalize(states)
         with torch.no_grad():
-            values = torch.sigmoid(self.net(torch.as_tensor(states))).squeeze(-1).numpy()
+            values = torch.sigmoid(self.net(torch.as_tensor(normalized))).squeeze(-1).numpy()
         return values.astype(np.float64)
 
     def state_dict(self) -> dict:
@@ -77,11 +86,15 @@ class DistilledPredictor:
             "net": self.net.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "state_dim": self.state_dim,
+            "input_mean": self.input_mean,
+            "input_std": self.input_std,
         }
 
     def load_state_dict(self, state: dict) -> None:
         self.net.load_state_dict(state["net"])
         self.optimizer.load_state_dict(state["optimizer"])
+        self.input_mean = np.asarray(state["input_mean"], dtype=np.float32)
+        self.input_std = np.asarray(state["input_std"], dtype=np.float32)
 
 
 def distillation_fidelity_report(
@@ -90,6 +103,7 @@ def distillation_fidelity_report(
     direct_values: np.ndarray,
     mae_max: float = 0.10,
     report_path: str | Path | None = None,
+    provenance: dict | None = None,
 ) -> dict:
     """Compare the predictor against direct queries on held-out states.
 
@@ -105,6 +119,8 @@ def distillation_fidelity_report(
         "max_abs_error": float(errors.max()),
         "mae_max": mae_max,
         "passed": bool(errors.mean() <= mae_max),
+        "predictor_hidden": predictor.hidden,
+        "provenance": dict(provenance or {}),
     }
     if report_path is not None:
         report_path = Path(report_path)

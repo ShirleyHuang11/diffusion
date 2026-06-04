@@ -56,6 +56,34 @@ def test_serialization_roundtrip():
     assert np.allclose(predictor.predict(states), clone.predict(states), atol=1e-6)
 
 
+def test_input_normalization_handles_badly_scaled_features():
+    """Without input normalization a feature at offset 1000 wrecks training;
+    the predictor must normalize internally and serialize the statistics."""
+    rng = np.random.default_rng(5)
+    states = rng.normal(size=(600, 4)).astype(np.float32)
+    states[:, 2] = states[:, 2] * 500.0 + 1000.0  # badly scaled feature
+    targets = (1.0 / (1.0 + np.exp(-states[:, 0]))).astype(np.float32)
+    predictor = DistilledPredictor(state_dim=4, seed=0)
+    predictor.fit(states, targets, epochs=150)
+    assert np.abs(predictor.predict(states) - targets).mean() < 0.08
+    clone = DistilledPredictor(state_dim=4, seed=9)
+    clone.load_state_dict(predictor.state_dict())
+    assert np.allclose(clone.input_mean, predictor.input_mean)
+    assert np.allclose(predictor.predict(states), clone.predict(states), atol=1e-6)
+
+
+def test_fidelity_report_carries_provenance(tmp_path):
+    states, targets = synthetic_data(n=100)
+    predictor = DistilledPredictor(state_dim=states.shape[1], seed=0)
+    predictor.fit(states, targets, epochs=20)
+    report = distillation_fidelity_report(
+        predictor, states[:20], targets[:20],
+        provenance={"layout": "cramped_room", "seed": 0},
+    )
+    assert report["provenance"]["layout"] == "cramped_room"
+    assert report["predictor_hidden"] == 64
+
+
 def test_target_validation():
     predictor = DistilledPredictor(state_dim=3)
     with pytest.raises(ValueError, match="\\[0, 1\\]"):

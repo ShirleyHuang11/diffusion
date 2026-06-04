@@ -157,17 +157,26 @@ class OvercookedSimulatorChecker(TransitionChecker):
         self._decode_cache: dict[bytes, object] = {}
 
     def _decode(self, flat: np.ndarray):
-        from reap.envs.overcooked_decode import decode_lossless
+        """Decode ONLY fully valid states: nonnegative delivery count on the
+        scale grid, integer-valued grid, and exact decode->re-encode
+        roundtrip. Anything else is unusable for transition replay."""
+        from reap.envs.overcooked_decode import decode_if_roundtrip
 
-        grid = np.asarray(flat[: self.grid_size], dtype=np.float64)
-        key = grid.tobytes()
+        flat = np.asarray(flat, dtype=np.float64)
+        key = flat.tobytes()
         if key not in self._decode_cache:
-            if np.all(grid == np.round(grid)):
-                self._decode_cache[key] = decode_lossless(
+            native = None
+            count = flat[-1]
+            count_ok = (
+                count >= -1e-9
+                and abs(count / DELIVERY_SCALE - round(count / DELIVERY_SCALE)) < 1e-6
+            )
+            grid = flat[: self.grid_size]
+            if count_ok and np.all(grid == np.round(grid)):
+                native = decode_if_roundtrip(
                     grid.astype(int).reshape(*self.grid_shape), self.mdp
                 )
-            else:
-                self._decode_cache[key] = None
+            self._decode_cache[key] = native
         return self._decode_cache[key]
 
     def realizable(self, state: np.ndarray, next_state: np.ndarray) -> bool:
@@ -361,11 +370,25 @@ def run_pipeline(
         "episodes_holdout": len(holdout_episodes),
     }
 
-    # anchors for measurement: training-side for quality, holdout for calibration
-    train_anchors, _ = anchor_outcomes(train_episodes, window, 2, rng)
-    train_anchors = train_anchors[
-        rng.choice(len(train_anchors), size=min(n_anchors, len(train_anchors)), replace=False)
+    # anchors for measurement: training-side for quality, holdout for calibration;
+    # deduplicate by state key so the signal table covers unique states
+    from reap.signals.potential import state_key
+
+    raw_train_anchors, _ = anchor_outcomes(train_episodes, window, 4, rng)
+    raw_anchor_count = len(raw_train_anchors)
+    seen: dict[bytes, int] = {}
+    for i, anchor in enumerate(raw_train_anchors):
+        seen.setdefault(state_key(anchor), i)
+    unique_anchors = raw_train_anchors[sorted(seen.values())]
+    keep_n = min(n_anchors, len(unique_anchors))
+    train_anchors = unique_anchors[
+        rng.choice(len(unique_anchors), size=keep_n, replace=False)
     ]
+    anchor_counts = {
+        "raw_anchor_rows": int(raw_anchor_count),
+        "unique_anchor_states": int(len(unique_anchors)),
+        "anchors_used": int(keep_n),
+    }
     generator = torch.Generator().manual_seed(seed)
 
     forward_windows = diffusion.sample(
@@ -473,20 +496,43 @@ def run_pipeline(
     )
 
     split = len(train_anchors) * 3 // 4
-    p_hat = DistilledPredictor(env.joint_state_dim, seed=seed)
-    p_hat.fit(train_anchors[:split], train_prop[:split], epochs=300)
+    distill_provenance = {
+        **provenance,
+        **anchor_counts,
+        "distill_train_states": int(split),
+        "distill_holdout_states": int(len(train_anchors) - split),
+        "predictor_epochs": 600,
+    }
+    p_hat = DistilledPredictor(env.joint_state_dim, hidden=256, seed=seed)
+    p_hat.fit(train_anchors[:split], train_prop[:split], epochs=600)
     p_report = distillation_fidelity_report(
         p_hat, train_anchors[split:], train_prop[split:],
         report_path=reports_dir / "distill_fidelity_cramped.json",
+        provenance=distill_provenance,
     )
-    f_hat = DistilledPredictor(env.joint_state_dim, seed=seed + 1)
-    f_hat.fit(train_anchors[:split], feasibility[:split], epochs=300)
+    f_hat = DistilledPredictor(env.joint_state_dim, hidden=256, seed=seed + 1)
+    f_hat.fit(train_anchors[:split], feasibility[:split], epochs=600)
     f_report = distillation_fidelity_report(
         f_hat, train_anchors[split:], feasibility[split:],
         report_path=reports_dir / "distill_fidelity_feasibility_cramped.json",
+        provenance=distill_provenance,
     )
     torch.save({"p_hat": p_hat.state_dict(), "f_hat": f_hat.state_dict()},
                out_dir / "predictors.pt")
+
+    # schema gate: every durable pipeline artifact must carry provenance
+    required_artifacts = [
+        "warmup_buffer_cramped.json",
+        "teacher_quality_cramped.json",
+        "calibration_cramped.json",
+        "potential_table_cramped.json",
+        "distill_fidelity_cramped.json",
+        "distill_fidelity_feasibility_cramped.json",
+    ]
+    for name in required_artifacts:
+        artifact = json.loads((reports_dir / name).read_text())
+        if "provenance" not in artifact or not artifact["provenance"]:
+            raise RuntimeError(f"pipeline artifact {name} lacks provenance")
 
     # stamp provenance into the warmup artifact as well
     warmup_path = reports_dir / "warmup_buffer_cramped.json"

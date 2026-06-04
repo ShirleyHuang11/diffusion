@@ -99,6 +99,50 @@ def test_simulator_checker_rejects_teleport_and_fake_delivery(env):
     assert not checker.realizable(joint, fake_delivery)
 
 
+def test_checker_rejects_non_roundtripping_endpoints(env):
+    """Codex round-5 reproduction: a corrupted static (counter) layer decodes
+    but does not roundtrip; the checker must reject it on EITHER endpoint."""
+    aug = DeliveryAugmentedOvercooked(env)
+    rng = np.random.default_rng(4)
+    _, joint = aug.reset()
+    result = aug.step(rng.integers(0, aug.num_actions, size=2).tolist())
+    checker = OvercookedSimulatorChecker(env._mdp, env.lossless_shape)
+    assert checker.realizable(joint, result.joint_state)  # sanity: real transition
+
+    grid_shape = env.lossless_shape
+    grid_size = int(np.prod(grid_shape))
+
+    def corrupt_counter_layer(flat):
+        out = flat.copy()
+        grid = out[:grid_size].reshape(*grid_shape).copy()
+        counter_cells = np.argwhere(grid[..., 11] == 1)  # counter_loc layer
+        cell = counter_cells[0]
+        grid[cell[0], cell[1], 11] = 0  # erase one counter: decodes, no roundtrip
+        out[:grid_size] = grid.ravel()
+        return out
+
+    corrupt_source = corrupt_counter_layer(joint)
+    assert not checker.realizable(corrupt_source, result.joint_state)
+    corrupt_target = corrupt_counter_layer(result.joint_state)
+    assert not checker.realizable(joint, corrupt_target)
+
+
+def test_checker_rejects_bad_delivery_counts(env):
+    aug = DeliveryAugmentedOvercooked(env)
+    rng = np.random.default_rng(5)
+    _, joint = aug.reset()
+    result = aug.step(rng.integers(0, aug.num_actions, size=2).tolist())
+    checker = OvercookedSimulatorChecker(env._mdp, env.lossless_shape)
+
+    fractional = joint.copy()
+    fractional[-1] = 0.5 * DELIVERY_SCALE  # not a count multiple
+    assert not checker.realizable(fractional, result.joint_state)
+
+    negative = joint.copy()
+    negative[-1] = -DELIVERY_SCALE
+    assert not checker.realizable(negative, result.joint_state)
+
+
 def test_exact_validator_flags_invalid_and_projects(env):
     aug = DeliveryAugmentedOvercooked(env)
     _, joint = aug.reset()

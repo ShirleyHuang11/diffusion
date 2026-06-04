@@ -173,13 +173,21 @@ def encode_state(state, mdp) -> np.ndarray:
     return np.asarray(mdp.lossless_state_encoding(state)[0], dtype=int)
 
 
-def roundtrip_valid(grid: np.ndarray, mdp) -> bool:
-    """Exact validity: the grid decodes and re-encodes to itself."""
+def decode_if_roundtrip(grid: np.ndarray, mdp):
+    """Decode only when exact: returns the state iff re-encoding reproduces
+    the grid (None otherwise). The single entry point for consumers that must
+    never accept non-roundtripping grids (the decoder alone tolerates some
+    static-layer corruption that only re-encoding exposes)."""
     state = decode_lossless(grid, mdp)
     if state is None:
-        return False
+        return None
     re_encoded = encode_state(state, mdp)
     grid = np.asarray(grid).astype(int)
-    return bool(
-        np.array_equal(re_encoded[..., COMPARE_LAYERS], grid[..., COMPARE_LAYERS])
-    )
+    if not np.array_equal(re_encoded[..., COMPARE_LAYERS], grid[..., COMPARE_LAYERS]):
+        return None
+    return state
+
+
+def roundtrip_valid(grid: np.ndarray, mdp) -> bool:
+    """Exact validity: the grid decodes and re-encodes to itself."""
+    return decode_if_roundtrip(grid, mdp) is not None
