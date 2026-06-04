@@ -1,0 +1,32 @@
+{
+  "gate_passed": null,
+  "metric_basis": "extrinsic channel only (task success rate, episode return)",
+  "run_name": "hardness_mappo_counter",
+  "seeds": {
+    "seed0": {
+      "env_step_final": 5000000,
+      "episode_return_mean_final": 0.0,
+      "episodes_total": 12500.0,
+      "records": 200,
+      "success_rate_final": 0.0
+    },
+    "seed1": {
+      "env_step_final": 5000000,
+      "episode_return_mean_final": 0.0,
+      "episodes_total": 12500.0,
+      "records": 200,
+      "success_rate_final": 0.0
+    },
+    "seed2": {
+      "env_step_final": 5000000,
+      "episode_return_mean_final": 0.0,
+      "episodes_total": 12500.0,
+      "records": 200,
+      "success_rate_final": 0.0
+    }
+  },
+  "success_rate_max": 0.0,
+  "success_rate_mean": 0.0,
+  "success_rate_min": 0.0,
+  "threshold": null
+}
