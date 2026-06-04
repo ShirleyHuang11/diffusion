@@ -1,5 +1,5 @@
 {
-  "coverage_states": 39,
+  "coverage_states": 48,
   "feasibility_range": [
     0.0,
     0.0
@@ -12,7 +12,7 @@
   ],
   "propensity_range": [
     0.0,
-    0.875
+    0.75
   ],
   "provenance": {
     "checker_method": "simulator search over all joint actions on decoded states",

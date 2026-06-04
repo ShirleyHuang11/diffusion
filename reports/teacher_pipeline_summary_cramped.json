@@ -2,25 +2,25 @@
   "calibration": {
     "action": "shrink_beta",
     "beta_after": 0.5,
-    "brier": 0.3744303385416667,
-    "raw_ece": 0.53515625
+    "brier": 0.318359375,
+    "raw_ece": 0.5130208333333333
   },
   "distill_f_hat": {
-    "mae": 0.005026204472718139,
+    "mae": 0.0007442231653840281,
     "passed": true
   },
   "distill_p_hat": {
-    "mae": 0.17678449923793474,
+    "mae": 0.3198095926394065,
     "passed": false
   },
   "feasibility_mean": 0.0,
   "potential_table": {
-    "coverage_states": 39,
+    "coverage_states": 48,
     "phi_bounded_in_unit_interval": true,
     "states_gated_out": 48,
     "tau_gate": 0.5
   },
-  "propensity_holdout_mean": 0.4466145833333333,
+  "propensity_holdout_mean": 0.484375,
   "provenance": {
     "checker_method": "simulator search over all joint actions on decoded states",
     "checker_scope": "bridge windows (quality report) and feasibility filtering",
@@ -41,11 +41,11 @@
   },
   "quality": {
     "bridge_consistency_rate": 0.0,
-    "endpoint_success_rate": 0.40625,
+    "endpoint_success_rate": 0.359375,
     "invalid_state_rate": 0.96875,
     "shaping_enabled": false
   },
-  "realized_holdout_mean": 0.22916666666666666,
+  "realized_holdout_mean": 0.0625,
   "teacher_loss_first20": 1.1042903423309327,
   "teacher_loss_last20": 0.7594375103712082,
   "warmup": {

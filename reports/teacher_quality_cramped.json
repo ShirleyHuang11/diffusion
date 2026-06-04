@@ -1,6 +1,6 @@
 {
   "bridge_consistency_rate": 0.0,
-  "endpoint_success_rate": 0.40625,
+  "endpoint_success_rate": 0.359375,
   "gate_violations": [
     "invalid_state_rate 0.969 > 0.1",
     "bridge_consistency_rate 0.000 < 0.8"

@@ -1,7 +1,32 @@
 {
   "holdout_states": 12,
-  "mae": 0.005026204472718139,
+  "mae": 0.0007442231653840281,
   "mae_max": 0.1,
-  "max_abs_error": 0.010263887234032154,
-  "passed": true
+  "max_abs_error": 0.00572094926610589,
+  "passed": true,
+  "predictor_hidden": 256,
+  "provenance": {
+    "anchors_used": 48,
+    "checker_method": "simulator search over all joint actions on decoded states",
+    "checker_scope": "bridge windows (quality report) and feasibility filtering",
+    "delivery_feature_scale": 0.1,
+    "distill_holdout_states": 12,
+    "distill_train_states": 36,
+    "episodes_holdout": 35,
+    "episodes_train": 140,
+    "horizon": 400,
+    "ladder_checkpoints": {
+      "mappo_rnd": "runs/probe_mappo_rnd_cramped/seed0",
+      "mappo_vanilla": "runs/gate_mappo_cramped/seed0"
+    },
+    "layout": "cramped_room",
+    "native_layout_name": "cramped_room",
+    "predictor_epochs": 600,
+    "raw_anchor_rows": 560,
+    "seed": 0,
+    "teacher_steps": 40000,
+    "unique_anchor_states": 220,
+    "validator_method": "simulator-decode roundtrip (decode_lossless -> re-encode identity)",
+    "window": 32
+  }
 }
