@@ -24,6 +24,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--teacher-steps", type=int, default=4000)
     parser.add_argument("--min-successes", type=int, default=25)
     parser.add_argument("--max-warmup-steps", type=int, default=120_000)
+    parser.add_argument("--d-model", type=int, default=128)
+    parser.add_argument("--num-layers", type=int, default=3)
+    parser.add_argument("--nhead", type=int, default=4)
+    parser.add_argument("--n-anchors", type=int, default=None,
+                        help="cap on unique anchors; default uses all")
+    parser.add_argument("--samples-per-state", type=int, default=64)
+    parser.add_argument("--feasibility-samples", type=int, default=8)
+    parser.add_argument("--distill-hidden", type=int, default=256)
+    parser.add_argument("--distill-epochs", type=int, default=600)
+    parser.add_argument("--device", default="auto")
     args = parser.parse_args(argv)
 
     seed_everything(args.seed)
@@ -32,6 +42,15 @@ def main(argv: list[str] | None = None) -> int:
         teacher_steps=args.teacher_steps,
         min_successes=args.min_successes,
         max_warmup_steps=args.max_warmup_steps,
+        d_model=args.d_model,
+        num_layers=args.num_layers,
+        nhead=args.nhead,
+        n_anchors=args.n_anchors,
+        samples_per_state=args.samples_per_state,
+        feasibility_samples=args.feasibility_samples,
+        distill_hidden=args.distill_hidden,
+        distill_epochs=args.distill_epochs,
+        device=args.device,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

@@ -79,13 +79,14 @@ def _likelihood_proxy_weights(
     mid-schedule noise level is a standard monotone proxy. Weights are
     softmax-normalized per call.
     """
+    device = next(model.parameters()).device
     t_mid = diffusion.num_steps // 2
-    t = torch.full((windows.shape[0],), t_mid, dtype=torch.long)
-    noise = torch.randn(windows.shape, generator=generator)
-    noisy = diffusion.q_sample(windows, t, noise)
+    t = torch.full((windows.shape[0],), t_mid, dtype=torch.long, device=device)
+    noise = torch.randn(windows.shape, device="cpu", generator=generator).to(device)
+    noisy = diffusion.q_sample(windows.to(device), t, noise)
     with torch.no_grad():
         predicted = model(noisy, t, None)
-    errors = ((predicted - noise) ** 2).mean(dim=(1, 2)).numpy()
+    errors = ((predicted - noise) ** 2).mean(dim=(1, 2)).cpu().numpy()
     logits = -errors
     logits -= logits.max()
     weights = np.exp(logits)

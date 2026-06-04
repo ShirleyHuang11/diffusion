@@ -25,7 +25,7 @@ class GaussianDiffusion:
         self.alpha_bar = torch.cumprod(alphas, dim=0)
 
     def q_sample(self, x0: torch.Tensor, t: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
-        ab = self.alpha_bar[t].view(-1, 1, 1)
+        ab = self.alpha_bar.to(x0.device)[t.to(x0.device)].view(-1, 1, 1)
         return ab.sqrt() * x0 + (1 - ab).sqrt() * noise
 
     def training_loss(
@@ -36,14 +36,20 @@ class GaussianDiffusion:
         cond_dropout: float = 0.1,
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:
+        # noise is drawn on CPU with the caller's generator (determinism),
+        # then moved to the model's device for compute
+        device = next(model.parameters()).device
         b = x0.shape[0]
-        t = torch.randint(0, self.num_steps, (b,), generator=generator)
-        noise = torch.randn(x0.shape, generator=generator)
+        x0 = x0.to(device)
+        t = torch.randint(0, self.num_steps, (b,), generator=generator).to(device)
+        noise = torch.randn(x0.shape, device="cpu", generator=generator).to(device)
         noisy = self.q_sample(x0, t, noise)
         use_cond = cond
         if cond is not None and cond_dropout > 0:
             if torch.rand((), generator=generator).item() < cond_dropout:
                 use_cond = None  # train the null-condition path for CFG
+        if use_cond is not None:
+            use_cond = use_cond.to(device)
         predicted = model(noisy, t, use_cond)
         return ((predicted - noise) ** 2).mean()
 
@@ -76,37 +82,42 @@ class GaussianDiffusion:
         ``pin`` maps window indices to (D,) or (n, D) tensors of known
         normalized states (e.g. {0: s_t} forward, {0: s_t, W-1: g} bridges).
         """
+        import math
+
+        device = next(model.parameters()).device
         w, d = model.window, model.state_dim
         pin = {
-            int(i): (v if v.dim() == 2 else v.unsqueeze(0).expand(n, -1)).float()
+            int(i): (v if v.dim() == 2 else v.unsqueeze(0).expand(n, -1)).float().to(device)
             for i, v in (pin or {}).items()
         }
         for index in pin:
             if not 0 <= index < w:
                 raise ValueError(f"pin index {index} outside window [0, {w})")
+        if cond is not None:
+            cond = cond.to(device)
 
-        x = torch.randn((n, w, d), generator=generator)
+        x = torch.randn((n, w, d), device="cpu", generator=generator).to(device)
         for step in reversed(range(self.num_steps)):
-            t = torch.full((n,), step, dtype=torch.long)
+            t = torch.full((n,), step, dtype=torch.long, device=device)
             # keep pinned positions on the known-trajectory manifold at this noise level
             for index, value in pin.items():
-                noise = torch.randn((n, d), generator=generator)
+                noise = torch.randn((n, d), device="cpu", generator=generator).to(device)
                 x[:, index] = self.q_sample(
                     value.unsqueeze(1), t, noise.unsqueeze(1)
                 ).squeeze(1)
             eps = self._predict_noise(model, x, t, cond, guidance_scale)
-            alpha = self.alphas[step]
-            alpha_bar = self.alpha_bar[step]
-            mean = (x - (1 - alpha) / (1 - alpha_bar).sqrt() * eps) / alpha.sqrt()
+            alpha = float(self.alphas[step])
+            alpha_bar = float(self.alpha_bar[step])
+            mean = (x - (1 - alpha) / math.sqrt(1 - alpha_bar) * eps) / math.sqrt(alpha)
             if step > 0:
-                x = mean + self.betas[step].sqrt() * torch.randn(
-                    (n, w, d), generator=generator
-                )
+                x = mean + math.sqrt(float(self.betas[step])) * torch.randn(
+                    (n, w, d), device="cpu", generator=generator
+                ).to(device)
             else:
                 x = mean
         for index, value in pin.items():
             x[:, index] = value  # exact pins on the final sample
-        return x
+        return x.cpu()
 
 
 def train_teacher(
@@ -137,3 +148,7 @@ def train_teacher(
         optimizer.step()
         history.append(float(loss.item()))
     return history
+
+
+def model_device(model: TrajectoryDenoiser) -> torch.device:
+    return next(model.parameters()).device

@@ -264,15 +264,28 @@ def run_pipeline(
     max_warmup_steps: int = 120_000,
     window: int = 32,
     teacher_steps: int = 4000,
-    n_anchors: int = 48,
-    samples_per_state: int = 16,
+    d_model: int = 128,
+    num_layers: int = 3,
+    nhead: int = 4,
+    n_anchors: int | None = None,  # None = use ALL unique training anchors
+    samples_per_state: int = 64,
+    feasibility_samples: int = 8,
+    distill_hidden: int = 256,
+    distill_epochs: int = 600,
+    device: str = "auto",
     seed: int = 0,
 ) -> dict:
+    import time as _time
+
+    start_time = _time.monotonic()
     out_dir = Path(out_dir)
     reports_dir = Path(reports_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(seed)
     torch.manual_seed(seed)
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    gpu_name = torch.cuda.get_device_name(0) if device == "cuda" else None
 
     base = OvercookedSparseEnv(layout=layout, horizon=horizon, encoding="lossless")
     env = DeliveryAugmentedOvercooked(base)
@@ -327,8 +340,8 @@ def run_pipeline(
 
     model = TrajectoryDenoiser(
         state_dim=env.joint_state_dim, window=window, cond_dim=cond_dim,
-        d_model=128, nhead=4, num_layers=3,
-    )
+        d_model=d_model, nhead=nhead, num_layers=num_layers,
+    ).to(device)
     diffusion = GaussianDiffusion(num_steps=100)
 
     cond_pool = torch.as_tensor(window_conds)
@@ -368,6 +381,15 @@ def run_pipeline(
         "ladder_checkpoints": {"mappo_vanilla": str(vanilla_run), "mappo_rnd": str(rnd_run)},
         "episodes_train": len(train_episodes),
         "episodes_holdout": len(holdout_episodes),
+        "d_model": d_model,
+        "num_layers": num_layers,
+        "nhead": nhead,
+        "samples_per_state": samples_per_state,
+        "feasibility_samples": feasibility_samples,
+        "distill_hidden": distill_hidden,
+        "distill_epochs": distill_epochs,
+        "device": device,
+        "gpu_name": gpu_name,
     }
 
     # stamp provenance into the warmup artifact as soon as it is known
@@ -385,11 +407,11 @@ def run_pipeline(
     seen: dict[bytes, int] = {}
     for i, anchor in enumerate(raw_train_anchors):
         seen.setdefault(state_key(anchor), i)
-    unique_anchors = raw_train_anchors[sorted(seen.values())]
-    keep_n = min(n_anchors, len(unique_anchors))
-    train_anchors = unique_anchors[
-        rng.choice(len(unique_anchors), size=keep_n, replace=False)
-    ]
+    # deterministic order: sort unique anchors by their state key bytes
+    unique_rows = sorted(seen.items(), key=lambda kv: kv[0])
+    unique_anchors = raw_train_anchors[[i for _, i in unique_rows]]
+    keep_n = len(unique_anchors) if n_anchors is None else min(n_anchors, len(unique_anchors))
+    train_anchors = unique_anchors[:keep_n]
     anchor_counts = {
         "raw_anchor_rows": int(raw_anchor_count),
         "unique_anchor_states": int(len(unique_anchors)),
@@ -397,17 +419,19 @@ def run_pipeline(
     }
     generator = torch.Generator().manual_seed(seed)
 
+    # generation-quality measurement uses a fixed deterministic anchor subset
+    quality_anchors = train_anchors[: min(48, len(train_anchors))]
     forward_windows = diffusion.sample(
-        model, n=len(train_anchors) * 4,
-        pin={0: torch.as_tensor(dataset.normalize(train_anchors), dtype=torch.float32)
+        model, n=len(quality_anchors) * 4,
+        pin={0: torch.as_tensor(dataset.normalize(quality_anchors), dtype=torch.float32)
              .repeat_interleave(4, dim=0)},
-        cond=torch.as_tensor(emb_rnd).expand(len(train_anchors) * 4, -1),
+        cond=torch.as_tensor(emb_rnd).expand(len(quality_anchors) * 4, -1),
         guidance_scale=2.0, generator=generator,
     )
-    bridge_idx = rng.choice(len(goal_states), size=len(train_anchors) * 4)
+    bridge_idx = rng.choice(len(goal_states), size=len(quality_anchors) * 4)
     bridge_windows = diffusion.sample(
-        model, n=len(train_anchors) * 4,
-        pin={0: torch.as_tensor(dataset.normalize(train_anchors), dtype=torch.float32)
+        model, n=len(quality_anchors) * 4,
+        pin={0: torch.as_tensor(dataset.normalize(quality_anchors), dtype=torch.float32)
              .repeat_interleave(4, dim=0),
              window - 1: torch.as_tensor(
                  dataset.normalize(goal_states[bridge_idx]), dtype=torch.float32)},
@@ -441,7 +465,7 @@ def run_pipeline(
     # direct-query propensity on holdout anchors + held-out calibration check
     holdout_anchors, holdout_realized = anchor_outcomes(holdout_episodes, window, 3, rng)
     keep = rng.choice(
-        len(holdout_anchors), size=min(n_anchors, len(holdout_anchors)), replace=False
+        len(holdout_anchors), size=min(48, len(holdout_anchors)), replace=False
     )
     holdout_anchors, holdout_realized = holdout_anchors[keep], holdout_realized[keep]
     propensity = estimate_propensity(
@@ -463,16 +487,31 @@ def run_pipeline(
         json.dumps(cal_report, indent=2, sort_keys=True)
     )
 
-    # feasibility direct queries on training anchors, then distill both signals
-    feasibility = estimate_feasibility(
-        diffusion, model, dataset, train_anchors, goal_states,
-        validator=validator, checker=checker,
-        samples_per_state=8, generator=generator,
+    # feasibility/propensity direct queries over ALL kept anchors, chunked so
+    # large sample counts fit device memory
+    def chunked(estimator, anchors, chunk_states):
+        parts = []
+        for start in range(0, len(anchors), chunk_states):
+            parts.append(estimator(anchors[start : start + chunk_states]))
+        return np.concatenate(parts)
+
+    feasibility = chunked(
+        lambda a: estimate_feasibility(
+            diffusion, model, dataset, a, goal_states,
+            validator=validator, checker=checker,
+            samples_per_state=feasibility_samples, generator=generator,
+        ),
+        train_anchors,
+        chunk_states=max(1, 2048 // feasibility_samples),
     )
-    train_prop = estimate_propensity(
-        diffusion, model, dataset, train_anchors,
-        policy_embedding=emb_rnd, success_fn=window_success, validator=validator,
-        samples_per_state=samples_per_state, guidance_scale=2.0, generator=generator,
+    train_prop = chunked(
+        lambda a: estimate_propensity(
+            diffusion, model, dataset, a,
+            policy_embedding=emb_rnd, success_fn=window_success, validator=validator,
+            samples_per_state=samples_per_state, guidance_scale=2.0, generator=generator,
+        ),
+        train_anchors,
+        chunk_states=max(1, 2048 // samples_per_state),
     )
 
     # direct-query potential table (the Section-5.5 shortcut, artifact-recorded)
@@ -501,25 +540,30 @@ def run_pipeline(
         json.dumps(potential_report, indent=2, sort_keys=True)
     )
 
-    split = len(train_anchors) * 3 // 4
+    # deterministic unique-key 3:1 split: every 4th anchor (by sorted-key
+    # order) is held out for the fidelity check
+    holdout_mask = np.arange(len(train_anchors)) % 4 == 3
+    fit_anchors, eval_anchors = train_anchors[~holdout_mask], train_anchors[holdout_mask]
+    fit_prop, eval_prop = train_prop[~holdout_mask], train_prop[holdout_mask]
+    fit_feas, eval_feas = feasibility[~holdout_mask], feasibility[holdout_mask]
     distill_provenance = {
         **provenance,
         **anchor_counts,
-        "distill_train_states": int(split),
-        "distill_holdout_states": int(len(train_anchors) - split),
-        "predictor_epochs": 600,
+        "distill_train_states": int(len(fit_anchors)),
+        "distill_holdout_states": int(len(eval_anchors)),
+        "split_rule": "deterministic by sorted state key: every 4th anchor held out",
     }
-    p_hat = DistilledPredictor(env.joint_state_dim, hidden=256, seed=seed)
-    p_hat.fit(train_anchors[:split], train_prop[:split], epochs=600)
+    p_hat = DistilledPredictor(env.joint_state_dim, hidden=distill_hidden, seed=seed)
+    p_hat.fit(fit_anchors, fit_prop, epochs=distill_epochs)
     p_report = distillation_fidelity_report(
-        p_hat, train_anchors[split:], train_prop[split:],
+        p_hat, eval_anchors, eval_prop,
         report_path=reports_dir / "distill_fidelity_cramped.json",
         provenance=distill_provenance,
     )
-    f_hat = DistilledPredictor(env.joint_state_dim, hidden=256, seed=seed + 1)
-    f_hat.fit(train_anchors[:split], feasibility[:split], epochs=600)
+    f_hat = DistilledPredictor(env.joint_state_dim, hidden=distill_hidden, seed=seed + 1)
+    f_hat.fit(fit_anchors, fit_feas, epochs=distill_epochs)
     f_report = distillation_fidelity_report(
-        f_hat, train_anchors[split:], feasibility[split:],
+        f_hat, eval_anchors, eval_feas,
         report_path=reports_dir / "distill_fidelity_feasibility_cramped.json",
         provenance=distill_provenance,
     )
@@ -541,6 +585,7 @@ def run_pipeline(
             raise RuntimeError(f"pipeline artifact {name} lacks provenance")
 
     summary = {
+        "runtime_seconds": round(_time.monotonic() - start_time, 1),
         "provenance": provenance,
         "potential_table": {k: potential_report[k] for k in
                             ("tau_gate", "coverage_states", "states_gated_out",
