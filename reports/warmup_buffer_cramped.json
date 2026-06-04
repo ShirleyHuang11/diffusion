@@ -26,6 +26,24 @@
       "successes": 0
     }
   },
+  "provenance": {
+    "checker_method": "simulator search over all joint actions on decoded states",
+    "checker_scope": "bridge windows (quality report) and feasibility filtering",
+    "delivery_feature_scale": 0.1,
+    "episodes_holdout": 35,
+    "episodes_train": 140,
+    "horizon": 400,
+    "ladder_checkpoints": {
+      "mappo_rnd": "runs/probe_mappo_rnd_cramped/seed0",
+      "mappo_vanilla": "runs/gate_mappo_cramped/seed0"
+    },
+    "layout": "cramped_room",
+    "native_layout_name": "cramped_room",
+    "seed": 0,
+    "teacher_steps": 40000,
+    "validator_method": "simulator-decode roundtrip (decode_lossless -> re-encode identity)",
+    "window": 32
+  },
   "return_mean": 27.314285714285713,
   "state_coverage": {
     "dim": 521,
