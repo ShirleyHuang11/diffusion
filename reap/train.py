@@ -453,10 +453,131 @@ def run_reap_mappo(cfg: Config, out_dir: Path, resume: bool) -> dict:
             "shaping_enabled": controller.enabled}
 
 
+def _run_trainer_loop(cfg: Config, out_dir: Path, resume: bool, trainer) -> dict:
+    """Generic budgeted train loop shared by the COMA and QMIX runners.
+
+    Identical protocol semantics to ``run_mappo`` (grid logging, exact-budget
+    final record, trajectory-faithful checkpoints) plus optional periodic
+    greedy evaluation on a SEPARATE env instance: published MPE sanity ranges
+    are maximum returns over greedy evaluation points, so the sanity report
+    needs an eval channel. Evaluation episodes never consume training budget;
+    they are logged under ``extrinsic`` with an ``eval_`` prefix.
+    """
+    params = trainer.p
+    eval_interval = int(params.get("eval_interval_env_steps", 0))
+    eval_episodes = int(params.get("eval_episodes", 100))
+    eval_env = make_env(cfg.env.id, **_env_kwargs(cfg)) if eval_interval else None
+
+    logger = MetricsLogger(out_dir, jsonl=cfg.logging.jsonl, csv_enabled=cfg.logging.csv)
+    ckpt_dir = out_dir / "checkpoints"
+    if resume:
+        ckpt_path = latest_checkpoint(ckpt_dir)
+        if ckpt_path is None:
+            raise ConfigError(f"--resume requested but no checkpoint found in {ckpt_dir}")
+        trainer.load_state_dict(load_checkpoint(ckpt_path)["trainer"])
+
+    start_time = time.monotonic()
+    deadline = start_time + cfg.run.max_wall_clock_minutes * 60
+
+    def grid_next(interval: int) -> int:
+        return (trainer.env_step // interval + 1) * interval
+
+    next_log = grid_next(cfg.logging.interval_env_steps)
+    next_ckpt = grid_next(cfg.checkpoint.interval_env_steps)
+    next_eval = grid_next(eval_interval) if eval_interval else None
+
+    def save() -> None:
+        save_checkpoint(
+            {"trainer": trainer.state_dict(), "config": cfg.to_dict()},
+            ckpt_dir / checkpoint_name(trainer.env_step),
+        )
+        prune_checkpoints(ckpt_dir, cfg.checkpoint.keep_last)
+
+    last_logged = -1
+    last_eval: dict = {}
+    rollout: dict | None = None
+    diags: dict = {}
+
+    def run_eval() -> None:
+        nonlocal last_eval
+        # deterministic per-point episode seeds derived from the run seed
+        last_eval = trainer.evaluate(
+            eval_env, eval_episodes, seed=cfg.run.seed * 1_000_000 + trainer.env_step
+        )
+
+    def log_now(rollout: dict, diags: dict) -> None:
+        nonlocal last_logged
+        logger.log(
+            trainer.env_step,
+            extrinsic={**trainer.episode_stats(), **last_eval},
+            shaped={"term_mean": 0.0, "term_abs_max": 0.0},
+            intrinsic={"bonus_mean": 0.0, **rollout.get("bonus_diag", {})},
+            diag={
+                **diags,
+                "updates": float(trainer.updates),
+                "wall_time_s": time.monotonic() - start_time,
+            },
+        )
+        last_logged = trainer.env_step
+
+    while trainer.env_step < cfg.algo.total_env_steps:
+        if time.monotonic() > deadline:
+            save()
+            raise WallClockExceeded(
+                f"run exceeded max_wall_clock_minutes={cfg.run.max_wall_clock_minutes}"
+            )
+        remaining = cfg.algo.total_env_steps - trainer.env_step
+        rollout = trainer.collect_rollout(max_steps=remaining)
+        diags = trainer.update(rollout)
+
+        at_budget = trainer.env_step >= cfg.algo.total_env_steps
+        if next_eval is not None and (trainer.env_step >= next_eval or at_budget):
+            run_eval()  # the final iteration always evaluates BEFORE logging,
+            # so the budget-step record carries the final greedy evaluation
+            next_eval = grid_next(eval_interval)
+        if trainer.env_step >= next_log or at_budget:
+            log_now(rollout, diags)
+            next_log = grid_next(cfg.logging.interval_env_steps)
+        if trainer.env_step >= next_ckpt:
+            save()
+            next_ckpt = grid_next(cfg.checkpoint.interval_env_steps)
+
+    save()
+    return {"env_step": trainer.env_step, **trainer.episode_stats(), **last_eval}
+
+
+def run_coma(cfg: Config, out_dir: Path, resume: bool) -> dict:
+    """COMA training on the configured env (extrinsic reward only)."""
+    from reap.algos.coma import ComaTrainer
+
+    env = make_env(cfg.env.id, **_env_kwargs(cfg))
+    params = dict(cfg.algo.params)
+    eval_keys = {k: params.pop(k) for k in
+                 ("eval_interval_env_steps", "eval_episodes") if k in params}
+    trainer = ComaTrainer(env, params, seed=cfg.run.seed)
+    trainer.p.update(eval_keys)
+    return _run_trainer_loop(cfg, out_dir, resume, trainer)
+
+
+def run_qmix(cfg: Config, out_dir: Path, resume: bool) -> dict:
+    """QMIX training on the configured env (extrinsic reward only)."""
+    from reap.algos.qmix import QmixTrainer
+
+    env = make_env(cfg.env.id, **_env_kwargs(cfg))
+    params = dict(cfg.algo.params)
+    eval_keys = {k: params.pop(k) for k in
+                 ("eval_interval_env_steps", "eval_episodes") if k in params}
+    trainer = QmixTrainer(env, params, seed=cfg.run.seed)
+    trainer.p.update(eval_keys)
+    return _run_trainer_loop(cfg, out_dir, resume, trainer)
+
+
 RUNNERS = {
     "random": run_random,
     "mappo": run_mappo,
     "reap_mappo": run_reap_mappo,
+    "coma": run_coma,
+    "qmix": run_qmix,
 }
 
 
