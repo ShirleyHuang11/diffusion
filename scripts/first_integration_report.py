@@ -69,7 +69,10 @@ def reap_evidence(runs_dir: str, reap_run: str, seeds: list[int]) -> dict:
     evidence = {}
     for seed in seeds:
         seed_dir = Path(runs_dir) / reap_run / f"seed{seed}"
-        entry: dict = {}
+        entry: dict = {
+            "metrics_path": str(seed_dir / "metrics.jsonl"),
+            "shaping_events_path": str(seed_dir / "shaping_events.jsonl"),
+        }
         events_path = seed_dir / "shaping_events.jsonl"
         if events_path.is_file():
             events = [json.loads(line) for line in events_path.read_text().splitlines()]
@@ -77,7 +80,14 @@ def reap_evidence(runs_dir: str, reap_run: str, seeds: list[int]) -> dict:
             refreshes = [e for e in events if e["type"] == "refresh"]
             entry["gate"] = ({"enabled": gates[0]["enabled"], "reason": gates[0]["reason"]}
                              if gates else None)
-            entry["refresh_count"] = len(refreshes)
+            # the event log is append-only across SLURM preemption restarts:
+            # each restart re-runs the seed from scratch and appends a fresh
+            # gate event, so gate_records-1 = restart count and the
+            # cumulative refresh count spans aborted segments; the final
+            # clean 5M-step segment is characterized by the metrics file
+            entry["gate_records"] = len(gates)
+            entry["restarts_detected"] = max(0, len(gates) - 1)
+            entry["refresh_count_cumulative_across_segments"] = len(refreshes)
             cals = [e["calibration"] for e in refreshes if "calibration" in e]
             if cals:
                 entry["calibration_actions"] = [c["action"] for c in cals]
@@ -88,6 +98,8 @@ def reap_evidence(runs_dir: str, reap_run: str, seeds: list[int]) -> dict:
             last = json.loads(metrics_path.read_text().splitlines()[-1])
             entry["wall_time_s"] = last.get("diag", {}).get("wall_time_s")
             entry["gpu_mem_mb"] = last.get("diag", {}).get("gpu_mem_mb")
+            entry["final_segment_refresh_count"] = last.get("diag", {}).get("refresh_count")
+            entry["final_segment_snapshot_id"] = last.get("shaped", {}).get("snapshot_id")
         evidence[f"seed{seed}"] = entry
     return evidence
 
@@ -144,10 +156,53 @@ def main(argv=None) -> int:
         "evidence": {
             "quality_report": args.quality_report,
             "calibration_report": args.calibration_report,
+            "warmup_report": args.quality_report.replace("teacher_quality", "warmup_buffer"),
+            "potential_table": args.quality_report.replace("teacher_quality", "potential_table"),
+            "distill_fidelity": args.quality_report.replace("teacher_quality", "distill_fidelity"),
+            "pipeline_summary": args.quality_report.replace(
+                "teacher_quality", "teacher_pipeline_summary"),
+            "per_arm_metrics": {
+                name: [f"{args.runs_dir}/{run}/seed{s}/metrics.jsonl" for s in seeds]
+                for name, run in (("reap", args.reap_run),
+                                  ("vanilla_mappo", args.vanilla_run),
+                                  ("mappo_rnd", args.rnd_run))
+            },
             "reap_per_seed": reap_evidence(args.runs_dir, args.reap_run, seeds),
         },
         "outcome_policy": "win, loss, and null results reported with equal prominence",
     }
+
+    # the conclusion lives IN the artifact, stated plainly (negative included)
+    reap_sr = arms["reap"]["success_rate"]["mean"]
+    vanilla_sr = arms["vanilla_mappo"]["success_rate"]["mean"]
+    rnd_sr = arms["mappo_rnd"]["success_rate"]["mean"]
+    if quality.get("shaping_enabled", False):
+        h4_supported = reap_sr > rnd_sr
+        report["conclusion"] = {
+            "summary": (
+                f"REAP (shaping enabled) final extrinsic success {reap_sr:.3f}, "
+                f"vanilla MAPPO {vanilla_sr:.3f}, MAPPO+RND {rnd_sr:.3f}."
+            ),
+            "h4_beats_generic_novelty": h4_supported,
+            "interpretation": (
+                "H4 is supported in this configuration." if h4_supported else
+                "H4 is NOT supported in this configuration: the enabled, "
+                "calibrated REAP signal did not outperform generic novelty "
+                "(RND). The calibrated propensity honestly reads near-zero for "
+                "a policy that never succeeds, so the shaping signal vanishes "
+                "exactly where exploration is the bottleneck — a first-class "
+                "negative result reported with equal prominence."
+            ),
+        }
+    else:
+        report["conclusion"] = {
+            "summary": (
+                f"REAP arm ran shaping-DISABLED by the scope gate; success "
+                f"{reap_sr:.3f} vs vanilla {vanilla_sr:.3f} and RND {rnd_sr:.3f}."
+            ),
+            "h4_beats_generic_novelty": None,
+            "interpretation": "no shaped comparison available for this scope",
+        }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, sort_keys=True))
@@ -173,9 +228,17 @@ def main(argv=None) -> int:
         )
     lines += [
         "",
+        "## Conclusion",
+        "",
+        report["conclusion"]["summary"],
+        "",
+        report["conclusion"]["interpretation"],
+        "",
         f"Evidence: quality report `{args.quality_report}`"
         + (f", calibration report `{args.calibration_report}`" if args.calibration_report else "")
-        + "; per-seed shaping events and wall-clock/GPU-memory in the JSON artifact.",
+        + "; warmup/potential-table/fidelity/pipeline-summary paths, per-arm "
+        "metrics paths, per-seed shaping events (with preemption-restart "
+        "accounting) and wall-clock/GPU-memory in the JSON artifact.",
         "",
         report["reap_arm_shaping"]["note"] + ".",
     ]

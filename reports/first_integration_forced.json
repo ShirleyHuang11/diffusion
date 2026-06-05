@@ -154,8 +154,33 @@
       ]
     }
   },
+  "conclusion": {
+    "h4_beats_generic_novelty": false,
+    "interpretation": "H4 is NOT supported in this configuration: the enabled, calibrated REAP signal did not outperform generic novelty (RND). The calibrated propensity honestly reads near-zero for a policy that never succeeds, so the shaping signal vanishes exactly where exploration is the bottleneck \u2014 a first-class negative result reported with equal prominence.",
+    "summary": "REAP (shaping enabled) final extrinsic success 0.000, vanilla MAPPO 0.000, MAPPO+RND 0.997."
+  },
   "evidence": {
     "calibration_report": "reports/calibration_hybrid_forced.json",
+    "distill_fidelity": "reports/distill_fidelity_hybrid_forced.json",
+    "per_arm_metrics": {
+      "mappo_rnd": [
+        "runs/first_integration_rnd_forced/seed0/metrics.jsonl",
+        "runs/first_integration_rnd_forced/seed1/metrics.jsonl",
+        "runs/first_integration_rnd_forced/seed2/metrics.jsonl"
+      ],
+      "reap": [
+        "runs/first_integration_reap_forced/seed0/metrics.jsonl",
+        "runs/first_integration_reap_forced/seed1/metrics.jsonl",
+        "runs/first_integration_reap_forced/seed2/metrics.jsonl"
+      ],
+      "vanilla_mappo": [
+        "runs/hardness_mappo_forced/seed0/metrics.jsonl",
+        "runs/hardness_mappo_forced/seed1/metrics.jsonl",
+        "runs/hardness_mappo_forced/seed2/metrics.jsonl"
+      ]
+    },
+    "pipeline_summary": "reports/teacher_pipeline_summary_hybrid_forced.json",
+    "potential_table": "reports/potential_table_hybrid_forced.json",
     "quality_report": "reports/teacher_quality_hybrid_forced.json",
     "reap_per_seed": {
       "seed0": {
@@ -187,12 +212,18 @@
         ],
         "calibration_brier_last": 0.0031086836606918355,
         "calibration_ece_last": 0.009856285527348518,
+        "final_segment_refresh_count": 24.0,
+        "final_segment_snapshot_id": 24.0,
         "gate": {
           "enabled": true,
           "reason": null
         },
+        "gate_records": 1,
         "gpu_mem_mb": 125.661696,
-        "refresh_count": 24,
+        "metrics_path": "runs/first_integration_reap_forced/seed0/metrics.jsonl",
+        "refresh_count_cumulative_across_segments": 24,
+        "restarts_detected": 0,
+        "shaping_events_path": "runs/first_integration_reap_forced/seed0/shaping_events.jsonl",
         "wall_time_s": 4591.18201210699
       },
       "seed1": {
@@ -249,12 +280,18 @@
         ],
         "calibration_brier_last": 0.005216035066782254,
         "calibration_ece_last": 0.012767188251018524,
+        "final_segment_refresh_count": 24.0,
+        "final_segment_snapshot_id": 24.0,
         "gate": {
           "enabled": true,
           "reason": null
         },
+        "gate_records": 4,
         "gpu_mem_mb": 125.661696,
-        "refresh_count": 49,
+        "metrics_path": "runs/first_integration_reap_forced/seed1/metrics.jsonl",
+        "refresh_count_cumulative_across_segments": 49,
+        "restarts_detected": 3,
+        "shaping_events_path": "runs/first_integration_reap_forced/seed1/shaping_events.jsonl",
         "wall_time_s": 6127.463108424097
       },
       "seed2": {
@@ -290,15 +327,22 @@
         ],
         "calibration_brier_last": 0.008279705286054484,
         "calibration_ece_last": 0.016085421666502953,
+        "final_segment_refresh_count": 24.0,
+        "final_segment_snapshot_id": 24.0,
         "gate": {
           "enabled": true,
           "reason": null
         },
+        "gate_records": 4,
         "gpu_mem_mb": 125.661696,
-        "refresh_count": 28,
+        "metrics_path": "runs/first_integration_reap_forced/seed2/metrics.jsonl",
+        "refresh_count_cumulative_across_segments": 28,
+        "restarts_detected": 3,
+        "shaping_events_path": "runs/first_integration_reap_forced/seed2/shaping_events.jsonl",
         "wall_time_s": 5955.8880571350455
       }
-    }
+    },
+    "warmup_report": "reports/warmup_buffer_hybrid_forced.json"
   },
   "experiment": "first integration: REAP vs vanilla MAPPO vs MAPPO+RND",
   "outcome_policy": "win, loss, and null results reported with equal prominence",
