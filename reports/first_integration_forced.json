@@ -1,6 +1,14 @@
 {
   "arms": {
     "mappo_rnd": {
+      "return": {
+        "ci95": [
+          136.93793180806742,
+          189.59540152526588
+        ],
+        "mean": 163.26666666666665,
+        "n": 3
+      },
       "return_mean": 163.26666666666665,
       "return_range": [
         153.6,
@@ -29,6 +37,14 @@
           "success_rate_final": 1.0
         }
       },
+      "success_rate": {
+        "ci95": [
+          0.9823244909002957,
+          1.0110088424330377
+        ],
+        "mean": 0.9966666666666667,
+        "n": 3
+      },
       "success_rate_mean": 0.9966666666666667,
       "success_rate_range": [
         0.99,
@@ -36,6 +52,14 @@
       ]
     },
     "reap": {
+      "return": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n": 3
+      },
       "return_mean": 0.0,
       "return_range": [
         0.0,
@@ -53,16 +77,24 @@
           "env_step_final": 5000000,
           "episode_return_mean_final": 0.0,
           "episodes_total": 12500.0,
-          "records": 200,
+          "records": 420,
           "success_rate_final": 0.0
         },
         "seed2": {
           "env_step_final": 5000000,
           "episode_return_mean_final": 0.0,
           "episodes_total": 12500.0,
-          "records": 200,
+          "records": 244,
           "success_rate_final": 0.0
         }
+      },
+      "success_rate": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n": 3
       },
       "success_rate_mean": 0.0,
       "success_rate_range": [
@@ -71,6 +103,14 @@
       ]
     },
     "vanilla_mappo": {
+      "return": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n": 3
+      },
       "return_mean": 0.0,
       "return_range": [
         0.0,
@@ -99,11 +139,165 @@
           "success_rate_final": 0.0
         }
       },
+      "success_rate": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n": 3
+      },
       "success_rate_mean": 0.0,
       "success_rate_range": [
         0.0,
         0.0
       ]
+    }
+  },
+  "evidence": {
+    "calibration_report": "reports/calibration_hybrid_forced.json",
+    "quality_report": "reports/teacher_quality_hybrid_forced.json",
+    "reap_per_seed": {
+      "seed0": {
+        "calibration_actions": [
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok"
+        ],
+        "calibration_brier_last": 0.0031086836606918355,
+        "calibration_ece_last": 0.009856285527348518,
+        "gate": {
+          "enabled": true,
+          "reason": null
+        },
+        "gpu_mem_mb": 125.661696,
+        "refresh_count": 24,
+        "wall_time_s": 4591.18201210699
+      },
+      "seed1": {
+        "calibration_actions": [
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok"
+        ],
+        "calibration_brier_last": 0.005216035066782254,
+        "calibration_ece_last": 0.012767188251018524,
+        "gate": {
+          "enabled": true,
+          "reason": null
+        },
+        "gpu_mem_mb": 125.661696,
+        "refresh_count": 49,
+        "wall_time_s": 6127.463108424097
+      },
+      "seed2": {
+        "calibration_actions": [
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok",
+          "ok"
+        ],
+        "calibration_brier_last": 0.008279705286054484,
+        "calibration_ece_last": 0.016085421666502953,
+        "gate": {
+          "enabled": true,
+          "reason": null
+        },
+        "gpu_mem_mb": 125.661696,
+        "refresh_count": 28,
+        "wall_time_s": 5955.8880571350455
+      }
     }
   },
   "experiment": "first integration: REAP vs vanilla MAPPO vs MAPPO+RND",
@@ -123,11 +317,9 @@
     "metric_basis": "extrinsic channel only (success rate, episode return)"
   },
   "reap_arm_shaping": {
-    "enabled": false,
-    "gate_violations": [
-      "warmup ladder collected 0 successful episodes (< required 25) within 120000 env steps; teacher training must not proceed on this scope"
-    ],
-    "note": "the REAP arm ran with shaping DISABLED by the scope-specific teacher-quality gate; its result is therefore expected to match vanilla MAPPO up to seed noise"
+    "enabled": true,
+    "gate_violations": [],
+    "note": "REAP arm ran with shaping enabled"
   },
   "task": "Overcooked-AI Forced Coordination, sparse delivery-only reward"
 }
