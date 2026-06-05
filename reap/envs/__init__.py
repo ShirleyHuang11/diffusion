@@ -11,4 +11,8 @@ def make_env(env_id: str, **kwargs) -> CoopEnv:
         from reap.envs.overcooked_env import OvercookedSparseEnv
 
         return OvercookedSparseEnv(**kwargs)
+    if env_id == "mpe_spread":
+        from reap.envs.mpe_spread import MpeSpreadEnv
+
+        return MpeSpreadEnv(**kwargs)
     raise ValueError(f"unknown env id: {env_id!r}")

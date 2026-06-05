@@ -40,6 +40,8 @@ def _env_kwargs(cfg: Config) -> dict:
     if cfg.env.id == "overcooked":
         kwargs["layout"] = cfg.env.layout
         kwargs["encoding"] = cfg.env.encoding
+    elif cfg.env.id == "mpe_spread":
+        kwargs["num_agents"] = cfg.env.num_agents
     return kwargs
 
 
