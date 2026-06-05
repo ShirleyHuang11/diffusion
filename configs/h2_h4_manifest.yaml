@@ -1,0 +1,32 @@
+# Manifest for the H2/H4 baseline-completion report (task18).
+# Maps every arm of every layout to its protocol run plus the gate and
+# sanity artifacts the report generator must validate against.
+expected_seeds: [0, 1, 2]
+expected_env_steps: 5000000
+
+layouts:
+  forced_coordination:
+    arms:
+      reap: first_integration_reap_forced
+      vanilla_mappo: hardness_mappo_forced
+      mappo_rnd: first_integration_rnd_forced
+      mappo_count: h4_count_forced
+      coma: h2_coma_forced
+      qmix: h2_qmix_forced
+    reap_quality_report: reports/teacher_quality_hybrid_forced.json
+  counter_circuit:
+    arms:
+      reap: h2h4_reap_counter
+      vanilla_mappo: hardness_mappo_counter
+      mappo_rnd: h4_rnd_counter
+      mappo_count: h4_count_counter
+      coma: h2_coma_counter
+      qmix: h2_qmix_counter
+    reap_quality_report: reports/teacher_quality_hybrid_counter.json
+
+sanity_reports:
+  coma: reports/sanity_coma_spread.json
+  qmix: reports/sanity_qmix_spread.json
+
+# Empirical PBRS invariance evidence on a layout the unshaped baseline solves
+invariance_report: reports/invariance_rnd_cramped.json

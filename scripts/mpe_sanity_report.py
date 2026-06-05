@@ -9,7 +9,7 @@ Usage:
 
 Compares the in-repo implementation against the published EPyMARL benchmark
 returns on MPE Spread and emits a PASS/FAIL verdict. A FAIL verdict gates the
-algorithm out of H2 claims (plan AC-9.2 negative test); it is a first-class
+algorithm out of H2 claims (the plan's sanity gate); it is a first-class
 result, not a generator error. Generator errors (exit 1) are protocol
 violations: missing seeds, budget mismatches, harness mismatches, or a
 missing evaluation channel.
@@ -204,7 +204,7 @@ def main(argv=None) -> int:
         interpretation = (
             f"the in-repo {args.algo.upper()} underperforms the published value "
             f"({measured['mean']:.2f} vs {published['mean']:.2f}, band {band}); "
-            f"it MUST NOT be used in H2 claims until fixed (plan AC-9.2 gate)"
+            f"it MUST NOT be used in H2 claims until fixed (sanity gate)"
         )
     else:
         interpretation = (

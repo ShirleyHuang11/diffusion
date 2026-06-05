@@ -302,7 +302,7 @@ def run_hybrid_pipeline(
     device: str = "auto",
     seed: int = 0,
 ) -> dict:
-    """End-to-end hybrid pipeline producing the AC-5/AC-6 artifact set."""
+    """End-to-end hybrid pipeline producing the teacher/signal artifact set."""
     import json
     import time as _time
     from pathlib import Path

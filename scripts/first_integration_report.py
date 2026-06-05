@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""First-integration report (AC-9.1): REAP vs MAPPO vs MAPPO+RND.
+"""First-integration report: REAP vs MAPPO vs MAPPO+RND.
 
 Usage:
     python scripts/first_integration_report.py \
@@ -217,7 +217,7 @@ def main(argv=None) -> int:
     out.write_text(json.dumps(report, indent=2, sort_keys=True))
 
     lines = [
-        "# First integration experiment (AC-9.1)",
+        "# First integration experiment",
         "",
         report["experiment"] + f" — {report['task']}.",
         f"Protocol: seeds {sorted(seeds)}, exact budget {args.expected_env_steps} "
