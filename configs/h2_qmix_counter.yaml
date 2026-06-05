@@ -35,3 +35,4 @@ logging:
 
 checkpoint:
   interval_env_steps: 250000
+  keep_last: 1
