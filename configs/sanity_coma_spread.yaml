@@ -1,0 +1,37 @@
+# COMA sanity validation on in-repo MPE Spread (task17, AC-9.2).
+# Protocol mirrors the published benchmark (Papoudakis et al. 2021, Table 3):
+# 3 agents, 25-step episodes, on-policy budget 20,000,000 env steps, periodic
+# greedy evaluation (100 episodes, 40 points), returns summed over agents.
+# Seeds {0,1,2} via --seed.
+run:
+  name: sanity_coma_spread
+  seed: 0
+  mode: paper
+  out_dir: runs
+  max_wall_clock_minutes: 1440
+  device: cpu
+
+env:
+  id: mpe_spread
+  num_agents: 3
+  horizon: 25
+
+algo:
+  name: coma
+  total_env_steps: 20000000
+  params:
+    rollout_length: 512
+    actor_lr: 0.0005
+    critic_lr: 0.0005
+    td_lambda: 0.8
+    entropy_coef: 0.01
+    target_update_interval: 10   # ~200 episodes between hard target syncs
+    hidden_size: 128
+    eval_interval_env_steps: 500000
+    eval_episodes: 100
+
+logging:
+  interval_env_steps: 100000
+
+checkpoint:
+  interval_env_steps: 1000000

@@ -1,0 +1,39 @@
+# QMIX sanity validation on in-repo MPE Spread (task17, AC-9.2).
+# Protocol mirrors the published benchmark (Papoudakis et al. 2021, Table 3):
+# 3 agents, 25-step episodes, off-policy budget 2,000,000 env steps, periodic
+# greedy evaluation (100 episodes, 40 points), returns summed over agents.
+# Seeds {0,1,2} via --seed.
+run:
+  name: sanity_qmix_spread
+  seed: 0
+  mode: paper
+  out_dir: runs
+  max_wall_clock_minutes: 720
+  device: cpu
+
+env:
+  id: mpe_spread
+  num_agents: 3
+  horizon: 25
+
+algo:
+  name: qmix
+  total_env_steps: 2000000
+  params:
+    rollout_length: 100          # ~4 episodes between update() calls
+    gradient_steps: 4            # ~1 gradient step per training episode
+    batch_size: 256
+    buffer_capacity: 125000      # ~5000 episodes, the reference buffer size
+    min_buffer_size: 1000
+    lr: 0.0005
+    eps_anneal_steps: 50000
+    target_update_interval: 50   # ~200 episodes between hard target syncs
+    hidden_size: 128
+    eval_interval_env_steps: 50000
+    eval_episodes: 100
+
+logging:
+  interval_env_steps: 50000
+
+checkpoint:
+  interval_env_steps: 250000
