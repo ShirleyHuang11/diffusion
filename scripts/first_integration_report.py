@@ -168,6 +168,15 @@ def main(argv=None) -> int:
                                   ("mappo_rnd", args.rnd_run))
             },
             "reap_per_seed": reap_evidence(args.runs_dir, args.reap_run, seeds),
+            "restart_accounting_note": (
+                "shaping_events.jsonl is append-only across SLURM preemption "
+                "restarts; each restart is a clean from-scratch rerun of the "
+                "seed, appending a fresh gate event, so gate_records-1 = "
+                "restarts_detected and refresh_count_cumulative_across_segments "
+                "spans aborted segments, while final_segment_refresh_count "
+                "(from the final metrics row) characterizes the clean "
+                "5,000,000-step segment that produced the reported results"
+            ),
         },
         "outcome_policy": "win, loss, and null results reported with equal prominence",
     }
@@ -237,8 +246,12 @@ def main(argv=None) -> int:
         f"Evidence: quality report `{args.quality_report}`"
         + (f", calibration report `{args.calibration_report}`" if args.calibration_report else "")
         + "; warmup/potential-table/fidelity/pipeline-summary paths, per-arm "
-        "metrics paths, per-seed shaping events (with preemption-restart "
-        "accounting) and wall-clock/GPU-memory in the JSON artifact.",
+        "metrics paths, per-seed shaping events and wall-clock/GPU-memory in "
+        "the JSON artifact. Restart accounting: the shaping event log is "
+        "append-only across SLURM preemption restarts and each restart is a "
+        "clean from-scratch rerun, so cumulative cross-segment refresh counts "
+        "are reported separately from the final clean-segment counts that "
+        "produced these results.",
         "",
         report["reap_arm_shaping"]["note"] + ".",
     ]

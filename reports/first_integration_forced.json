@@ -342,6 +342,7 @@
         "wall_time_s": 5955.8880571350455
       }
     },
+    "restart_accounting_note": "shaping_events.jsonl is append-only across SLURM preemption restarts; each restart is a clean from-scratch rerun of the seed, appending a fresh gate event, so gate_records-1 = restarts_detected and refresh_count_cumulative_across_segments spans aborted segments, while final_segment_refresh_count (from the final metrics row) characterizes the clean 5,000,000-step segment that produced the reported results",
     "warmup_report": "reports/warmup_buffer_hybrid_forced.json"
   },
   "experiment": "first integration: REAP vs vanilla MAPPO vs MAPPO+RND",

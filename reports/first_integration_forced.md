@@ -18,6 +18,6 @@ REAP (shaping enabled) final extrinsic success 0.000, vanilla MAPPO 0.000, MAPPO
 
 H4 is NOT supported in this configuration: the enabled, calibrated REAP signal did not outperform generic novelty (RND). The calibrated propensity honestly reads near-zero for a policy that never succeeds, so the shaping signal vanishes exactly where exploration is the bottleneck — a first-class negative result reported with equal prominence.
 
-Evidence: quality report `reports/teacher_quality_hybrid_forced.json`, calibration report `reports/calibration_hybrid_forced.json`; warmup/potential-table/fidelity/pipeline-summary paths, per-arm metrics paths, per-seed shaping events (with preemption-restart accounting) and wall-clock/GPU-memory in the JSON artifact.
+Evidence: quality report `reports/teacher_quality_hybrid_forced.json`, calibration report `reports/calibration_hybrid_forced.json`; warmup/potential-table/fidelity/pipeline-summary paths, per-arm metrics paths, per-seed shaping events and wall-clock/GPU-memory in the JSON artifact. Restart accounting: the shaping event log is append-only across SLURM preemption restarts and each restart is a clean from-scratch rerun, so cumulative cross-segment refresh counts are reported separately from the final clean-segment counts that produced these results.
 
 REAP arm ran with shaping enabled.
