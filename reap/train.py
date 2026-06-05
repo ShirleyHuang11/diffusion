@@ -500,10 +500,21 @@ def _run_trainer_loop(cfg: Config, out_dir: Path, resume: bool, trainer) -> dict
 
     def run_eval() -> None:
         nonlocal last_eval
-        # deterministic per-point episode seeds derived from the run seed
-        last_eval = trainer.evaluate(
-            eval_env, eval_episodes, seed=cfg.run.seed * 1_000_000 + trainer.env_step
-        )
+        # deterministic per-point episode seeds derived from the run seed;
+        # eval_at_env_step records WHEN this evaluation ran, because the
+        # values repeat in subsequent records until the next eval point
+        # (the CSV schema must be identical from the first record onward)
+        last_eval = {
+            **trainer.evaluate(
+                eval_env, eval_episodes,
+                seed=cfg.run.seed * 1_000_000 + trainer.env_step,
+            ),
+            "eval_at_env_step": float(trainer.env_step),
+        }
+
+    if eval_env is not None:
+        run_eval()  # initial-policy evaluation; keeps the metrics schema
+        # consistent from the first record (every record carries eval keys)
 
     def log_now(rollout: dict, diags: dict) -> None:
         nonlocal last_logged

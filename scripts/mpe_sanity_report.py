@@ -114,12 +114,22 @@ def load_seed(run_dir: Path, seed: int, expected_steps: int, algo: str) -> dict:
             f"{final_step}, expected exactly {expected_steps}"
         )
 
-    eval_points = [
-        {"env_step": r["env_step"],
-         "eval_return_mean": r["extrinsic"]["eval_return_mean"],
-         "eval_episodes": r["extrinsic"].get("eval_episodes")}
-        for r in records if "eval_return_mean" in r.get("extrinsic", {})
-    ]
+    # eval values repeat in records between eval points (consistent CSV
+    # schema); dedupe on the stamped evaluation step
+    eval_points, seen_steps = [], set()
+    for r in records:
+        ext = r.get("extrinsic", {})
+        if "eval_return_mean" not in ext:
+            continue
+        at_step = ext.get("eval_at_env_step", r["env_step"])
+        if at_step in seen_steps:
+            continue
+        seen_steps.add(at_step)
+        eval_points.append({
+            "env_step": at_step,
+            "eval_return_mean": ext["eval_return_mean"],
+            "eval_episodes": ext.get("eval_episodes"),
+        })
     if not eval_points:
         raise ProtocolError(
             f"seed{seed} has no greedy-evaluation channel; sanity validation "
