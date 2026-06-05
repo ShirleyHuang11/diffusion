@@ -22,6 +22,7 @@ import numpy as np
 import torch
 from torch import nn
 
+from reap.algos.intrinsic import RunningMeanStd
 from reap.algos.mappo import _mlp
 from reap.envs.base import CoopEnv
 
@@ -35,6 +36,8 @@ DEFAULT_PARAMS = {
     "max_grad_norm": 10.0,
     "hidden_size": 128,
     "target_update_interval": 200,  # hard target-critic sync, in updates
+    "standardise_rewards": False,  # EPyMARL-style: critic targets use running-
+    # standardized rewards; metrics always report the raw extrinsic channel
     "episode_window": 100,
 }
 
@@ -99,6 +102,7 @@ class ComaTrainer:
         self.target_critic = _clone_module(self.nets.critic)
         self.actor_opt = torch.optim.Adam(self.nets.actor.parameters(), lr=self.p["actor_lr"])
         self.critic_opt = torch.optim.Adam(self.nets.critic.parameters(), lr=self.p["critic_lr"])
+        self.reward_rms = RunningMeanStd() if self.p["standardise_rewards"] else None
 
         self.env_step = 0
         self.updates = 0
@@ -200,6 +204,11 @@ class ComaTrainer:
         acts = torch.as_tensor(rollout["actions"])
         next_acts = torch.as_tensor(rollout["next_actions"])
         rewards = rollout["extrinsic"]
+        if self.reward_rms is not None:
+            # learning targets see the standardized view; the rollout dict and
+            # all metrics keep the raw extrinsic channel
+            self.reward_rms.update(rewards)
+            rewards = (rewards - self.reward_rms.mean) / self.reward_rms.std
         dones = rollout["dones"]
 
         # bootstrap values: target critic evaluated at the NEXT joint action
@@ -278,6 +287,8 @@ class ComaTrainer:
             "target_critic": self.target_critic.state_dict(),
             "actor_opt": self.actor_opt.state_dict(),
             "critic_opt": self.critic_opt.state_dict(),
+            "reward_rms": (self.reward_rms.state_dict()
+                           if self.reward_rms is not None else None),
             "env_step": self.env_step,
             "updates": self.updates,
             "episodes": self.episodes,
@@ -297,6 +308,9 @@ class ComaTrainer:
         self.target_critic.load_state_dict(state["target_critic"])
         self.actor_opt.load_state_dict(state["actor_opt"])
         self.critic_opt.load_state_dict(state["critic_opt"])
+        if state.get("reward_rms") is not None:
+            self.reward_rms = RunningMeanStd()
+            self.reward_rms.load_state_dict(state["reward_rms"])
         self.env_step = state["env_step"]
         self.updates = state["updates"]
         self.episodes = state["episodes"]

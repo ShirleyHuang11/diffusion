@@ -27,6 +27,7 @@ algo:
     critic_lr: 0.0005
     td_lambda: 0.8
     target_update_interval: 10
+    standardise_rewards: true
 
 logging:
   interval_env_steps: 25000

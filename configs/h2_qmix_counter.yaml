@@ -22,12 +22,13 @@ algo:
   params:
     rollout_length: 1024
     gradient_steps: 8
-    batch_size: 256
+    batch_size: 768
     buffer_capacity: 50000
     min_buffer_size: 2000
     lr: 0.0005
     eps_anneal_steps: 50000
     target_update_interval: 50
+    standardise_rewards: true
     hidden_size: 128
 
 logging:

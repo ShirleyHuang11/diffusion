@@ -207,6 +207,25 @@ def test_resume_is_trajectory_faithful_mid_episode(tmp_path, algo):
     assert part_view == full_view[: len(part_view)]
 
 
+@pytest.mark.parametrize("trainer_cls,base", [(ComaTrainer, COMA_TINY),
+                                              (QmixTrainer, QMIX_TINY)])
+def test_standardise_rewards_state_in_checkpoint(trainer_cls, base):
+    from reap.envs.mpe_spread import MpeSpreadEnv
+
+    env = MpeSpreadEnv()
+    trainer = trainer_cls(env, {**base, "standardise_rewards": True}, seed=0)
+    trainer.update(trainer.collect_rollout())
+    state = trainer.state_dict()
+    assert state["reward_rms"] is not None
+    assert state["reward_rms"]["count"] > 1  # statistics actually accumulated
+    env2 = MpeSpreadEnv()
+    restored = trainer_cls(env2, {**base, "standardise_rewards": True}, seed=1)
+    restored.load_state_dict(state)
+    assert restored.reward_rms.mean == pytest.approx(trainer.reward_rms.mean)
+    # metrics stay on the raw extrinsic scale (standardization is target-only)
+    assert trainer.episode_stats()["episode_return_mean"] < -50.0
+
+
 def test_qmix_learns_chain_coordination():
     """Sanity: QMIX solves the 2-agent coordination chain from sparse reward."""
     torch.manual_seed(0)

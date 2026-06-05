@@ -23,6 +23,7 @@ import torch
 from torch import nn
 
 from reap.algos.coma import _clone_module, greedy_evaluate
+from reap.algos.intrinsic import RunningMeanStd
 from reap.algos.mappo import _mlp
 from reap.envs.base import CoopEnv
 
@@ -42,6 +43,8 @@ DEFAULT_PARAMS = {
     "eps_anneal_steps": 50_000,
     "target_update_interval": 200,  # hard target sync, in update() calls
     "max_grad_norm": 10.0,
+    "standardise_rewards": False,  # EPyMARL-style: TD targets use running-
+    # standardized rewards; raw rewards stay in the buffer and in metrics
     "episode_window": 100,
 }
 
@@ -176,6 +179,7 @@ class QmixTrainer:
             self.p["buffer_capacity"], env.num_agents, env.local_obs_dim,
             env.joint_state_dim,
         )
+        self.reward_rms = RunningMeanStd() if self.p["standardise_rewards"] else None
 
         self.env_step = 0
         self.updates = 0
@@ -227,6 +231,8 @@ class QmixTrainer:
                 np.asarray(result.local_obs, dtype=np.float32),
                 np.asarray(result.joint_state, dtype=np.float32), float(done),
             )
+            if self.reward_rms is not None:
+                self.reward_rms.update(np.array([result.extrinsic_reward]))
             self._ep_return += result.extrinsic_reward
 
             if done:
@@ -268,7 +274,12 @@ class QmixTrainer:
                 next_target = self.target_nets.agent_qs(batch["next_obs"])
                 next_chosen = next_target.gather(-1, next_actions).squeeze(-1)
                 next_q_tot = self.target_nets.mix(next_chosen, batch["next_state"])
-                targets = batch["rewards"] + self.gamma * (1 - batch["dones"]) * next_q_tot
+                rewards = batch["rewards"]
+                if self.reward_rms is not None:
+                    # buffer keeps raw rewards; targets see the standardized
+                    # view under the CURRENT running statistics
+                    rewards = (rewards - self.reward_rms.mean) / self.reward_rms.std
+                targets = rewards + self.gamma * (1 - batch["dones"]) * next_q_tot
 
             loss = torch.nn.functional.mse_loss(q_tot, targets)
             self.optimizer.zero_grad()
@@ -311,6 +322,8 @@ class QmixTrainer:
             "target_nets": self.target_nets.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "buffer": self.buffer.state_dict(),
+            "reward_rms": (self.reward_rms.state_dict()
+                           if self.reward_rms is not None else None),
             "env_step": self.env_step,
             "updates": self.updates,
             "episodes": self.episodes,
@@ -330,6 +343,9 @@ class QmixTrainer:
         self.target_nets.load_state_dict(state["target_nets"])
         self.optimizer.load_state_dict(state["optimizer"])
         self.buffer.load_state_dict(state["buffer"])
+        if state.get("reward_rms") is not None:
+            self.reward_rms = RunningMeanStd()
+            self.reward_rms.load_state_dict(state["reward_rms"])
         self.env_step = state["env_step"]
         self.updates = state["updates"]
         self.episodes = state["episodes"]

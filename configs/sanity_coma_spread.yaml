@@ -26,6 +26,7 @@ algo:
     td_lambda: 0.8
     entropy_coef: 0.01
     target_update_interval: 10   # ~200 episodes between hard target syncs
+    standardise_rewards: true
     hidden_size: 128
     eval_interval_env_steps: 500000
     eval_episodes: 100
